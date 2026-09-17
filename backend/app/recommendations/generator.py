@@ -178,6 +178,24 @@ def _build_constraint_instructions(profile: EnvironmentalProfile) -> tuple[list[
 # Confidence Scoring
 # ---------------------------------------------------------------------------
 
+# Source-type credibility keywords
+_META_ANALYSIS_KEYWORDS = ["meta-analysis", "meta analysis", "systematic review", "1,705", "157 studies", "89 field", "global synthesis"]
+_INSTITUTIONAL_KEYWORDS = ["ipcc", "fao", "ipbes", "special report", "assessment report"]
+_MULTI_SITE_KEYWORDS = ["multi-site", "global survey", "landscape scale", "across regions"]
+
+
+def _get_source_weight(source_str: str, summary_str: str = "") -> float:
+    """Returns credibility weight based on study design."""
+    combined = f"{source_str} {summary_str}".lower()
+    if any(k in combined for k in _META_ANALYSIS_KEYWORDS):
+        return 1.0
+    if any(k in combined for k in _INSTITUTIONAL_KEYWORDS):
+        return 0.85
+    if any(k in combined for k in _MULTI_SITE_KEYWORDS):
+        return 0.75
+    return 0.60  # single-site / local empirical study
+
+
 def _compute_confidence(
     pathway: StressPathway,
     profile: EnvironmentalProfile,
@@ -187,60 +205,102 @@ def _compute_confidence(
     Deterministic confidence scorer.
 
     Components:
-      • profile_completeness (0–0.4): proportion of pathway nodes that have known profile values
-      • evidence_quality (0–0.4): mean similarity score of retrieved entries, floor-adjusted
-      • evidence_directness (0–0.2): bonus if any retrieved entry targets this pathway's edges directly
-      minus counterpoint_penalty (−0.1 per counterpoint, max −0.2)
+      • profile_grounding (0–0.40):
+          - Root trigger variable is provided with high confidence in profile: +0.25
+          - Terminal impact variable / observation is corroborated in profile: +0.15
+      • evidence_quality (0–0.40):
+          - Mean of (similarity_score × source_weight) normalized to 0–0.40
+      • evidence_directness (0–0.20):
+          - Direct edge coverage bonus (0.07 per direct hit, max 0.20)
+      • counterpoint_penalty (−0.10 per counterpoint, max −0.20)
+      • pathway_strength_mod (0.0 for ESTABLISHED, -0.05 for LIKELY, -0.10 for CONTEXT_DEPENDENT)
     """
     basis_parts = []
 
-    # 1. Profile completeness for this pathway's nodes
-    node_fields = pathway.nodes  # e.g. ["soil.organic_carbon_percent", "soil.water_infiltration", ...]
-    known_count = 0
-    for node_path in node_fields:
-        parts = node_path.split(".")
-        if len(parts) == 2:
-            section, field = parts
-            try:
-                section_obj = getattr(profile, section, None)
-                if section_obj is not None:
-                    metric = getattr(section_obj, field, None)
-                    if metric is not None and hasattr(metric, "is_known") and metric.is_known:
-                        known_count += 1
-            except Exception:
-                pass
-    # Intermediate / derived nodes (like soil.water_infiltration, soil.moisture_stress)
-    # aren't direct profile fields — only count the ones that actually resolve
-    total_nodes = max(len(node_fields), 1)
-    completeness_ratio = known_count / total_nodes
-    profile_score = round(completeness_ratio * 0.4, 3)
+    # 1. Profile grounding: check if the root trigger and terminal impact are anchored in profile
+    root_node = pathway.start_variable
+    term_node = pathway.terminal_variable
+    
+    root_grounded = False
+    root_parts = root_node.split(".")
+    if len(root_parts) == 2:
+        sec, fld = root_parts
+        sec_obj = getattr(profile, sec, None)
+        if sec_obj:
+            metric = getattr(sec_obj, fld, None)
+            if metric and hasattr(metric, "is_known") and metric.is_known:
+                root_grounded = True
+    
+    # Terminal grounding (check direct metric or related observed issues)
+    term_grounded = False
+    term_parts = term_node.split(".")
+    if len(term_parts) == 2:
+        sec, fld = term_parts
+        sec_obj = getattr(profile, sec, None)
+        if sec_obj:
+            metric = getattr(sec_obj, fld, None)
+            if metric and hasattr(metric, "is_known") and metric.is_known:
+                term_grounded = True
+    
+    # Also check qualitative observations (e.g. pollinator decline in biodiversity)
+    if "pollinator" in term_node and (
+        profile.biodiversity.pollinator_presence.is_known
+        or "pollinator_decline" in profile.biodiversity.observed_issues
+    ):
+        term_grounded = True
+    elif "species_richness" in term_node and (
+        profile.biodiversity.species_richness.is_known
+        or "biodiversity_loss" in profile.biodiversity.observed_issues
+    ):
+        term_grounded = True
+
+    profile_grounding_score = 0.0
+    if root_grounded:
+        profile_grounding_score += 0.25
+    if term_grounded:
+        profile_grounding_score += 0.15
+    profile_grounding_score = round(profile_grounding_score, 3)
+
     basis_parts.append(
-        f"profile completeness {known_count}/{total_nodes} pathway nodes known → {profile_score:.2f}"
+        f"profile grounding (root={root_grounded}, terminal={term_grounded}) → {profile_grounding_score:.2f}"
     )
 
-    # 2. Evidence quality: mean similarity score of retrieved entries
-    sim_scores = [e.get("similarity_score", 0.0) for e in retrieved_evidence]
-    mean_sim = sum(sim_scores) / len(sim_scores) if sim_scores else 0.0
-    evidence_quality_score = round(mean_sim * 0.4, 3)
+    # 2. Evidence quality: weighted similarity by study type (meta-analysis > single study)
+    if retrieved_evidence:
+        weighted_sims = []
+        for ev in retrieved_evidence:
+            sim = ev.get("similarity_score", 0.70)
+            src = ev.get("source", "")
+            summ = ev.get("summary", "")
+            wt = _get_source_weight(src, summ)
+            weighted_sims.append(sim * wt)
+        mean_weighted_sim = sum(weighted_sims) / len(weighted_sims)
+    else:
+        mean_weighted_sim = 0.0
+
+    evidence_quality_score = round(min(0.40, mean_weighted_sim * 0.45), 3)
     basis_parts.append(
-        f"evidence quality mean_similarity={mean_sim:.3f} → {evidence_quality_score:.2f}"
+        f"evidence quality (weighted_sim={mean_weighted_sim:.3f}) → {evidence_quality_score:.2f}"
     )
 
-    # 3. Evidence directness: does any entry directly target this pathway's edges?
+    # 3. Evidence directness: how many pathway edges are directly targeted by corpus entries
     pathway_edge_ids = {e.id for e in pathway.edges}
     direct_hits = sum(
         1 for ev in retrieved_evidence
         if any(eid in pathway_edge_ids for eid in ev.get("edge_ids", []))
     )
-    directness_score = min(0.2, direct_hits * 0.1)
+    directness_score = round(min(0.20, direct_hits * 0.07), 3)
     basis_parts.append(
-        f"{direct_hits} direct-edge evidence hit(s) → {directness_score:.2f}"
+        f"{direct_hits} direct-edge hit(s) → {directness_score:.2f}"
     )
 
     # 4. Counterpoint penalty
-    counterpoints = [ev for ev in retrieved_evidence if ev.get("is_counterpoint", False)]
-    penalty = min(0.2, len(counterpoints) * 0.1)
-    if counterpoints:
+    counterpoints = [
+        ev for ev in retrieved_evidence
+        if ev.get("is_counterpoint", False) or "guardrail" in str(ev.get("status", "")).lower()
+    ]
+    penalty = round(min(0.20, len(counterpoints) * 0.10), 3)
+    if penalty > 0:
         basis_parts.append(
             f"{len(counterpoints)} counterpoint(s) detected → −{penalty:.2f} penalty"
         )
@@ -249,12 +309,12 @@ def _compute_confidence(
     strength_mod = {
         EdgeStrength.ESTABLISHED: 0.0,
         EdgeStrength.LIKELY: -0.05,
-        EdgeStrength.CONTEXT_DEPENDENT: -0.1,
+        EdgeStrength.CONTEXT_DEPENDENT: -0.10,
     }.get(pathway.confidence, 0.0)
     if strength_mod < 0:
         basis_parts.append(f"pathway confidence={pathway.confidence.value} → {strength_mod:.2f}")
 
-    raw = profile_score + evidence_quality_score + directness_score - penalty + strength_mod
+    raw = profile_grounding_score + evidence_quality_score + directness_score - penalty + strength_mod
     final = round(max(0.0, min(1.0, raw)), 3)
     basis_parts.append(f"final={final}")
 
@@ -368,6 +428,100 @@ class RecommendationGenerator:
         ant_key = anthropic_api_key or settings.anthropic_api_key
         groq_key = groq_api_key or getattr(settings, "groq_api_key", "")
 
+# ---------------------------------------------------------------------------
+# Deduplication Helpers
+# ---------------------------------------------------------------------------
+
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he",
+    "in", "is", "it", "its", "of", "on", "that", "the", "to", "was", "were",
+    "will", "with", "this", "such", "using", "into", "through", "across", "other"
+}
+
+
+def _normalize_unicode(text: str) -> str:
+    """Normalizes non-breaking spaces, unicode dashes/hyphens, and quotes to ASCII."""
+    if not text:
+        return text
+    text = text.replace("\u00a0", " ")
+    for dash in ["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"]:
+        text = text.replace(dash, "-")
+    text = text.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
+    return text
+
+
+def _compute_text_jaccard(text1: str, text2: str) -> float:
+    """Computes content-word Jaccard similarity between two texts."""
+    import re
+    w1 = set(re.findall(r"\b[a-zA-Z]{3,}\b", text1.lower())) - _STOPWORDS
+    w2 = set(re.findall(r"\b[a-zA-Z]{3,}\b", text2.lower())) - _STOPWORDS
+    if not w1 or not w2:
+        return 0.0
+    intersection = len(w1 & w2)
+    union = len(w1 | w2)
+    return intersection / union if union > 0 else 0.0
+
+
+def _filter_subsumed_pathways(pathways: list[StressPathway]) -> list[StressPathway]:
+    """
+    Suppresses shorter sub-chains when a strictly more comprehensive causal chain
+    sharing the same terminal variable is already present.
+    """
+    # Sort longest first so we prioritize maximal root-to-terminal chains
+    sorted_paths = sorted(pathways, key=lambda p: len(p.nodes), reverse=True)
+    selected: list[StressPathway] = []
+
+    for path in sorted_paths:
+        is_subsumed = False
+        path_nodes_set = set(path.nodes)
+        for existing in selected:
+            # If the current pathway's nodes are a subset of an existing longer pathway
+            # and they target the same terminal outcome, it's subsumed
+            if (
+                path.terminal_variable == existing.terminal_variable
+                and path_nodes_set.issubset(set(existing.nodes))
+            ):
+                logger.debug(
+                    f"Subsuming pathway {path.pathway_id} ({len(path.nodes)} nodes) into "
+                    f"{existing.pathway_id} ({len(existing.nodes)} nodes)"
+                )
+                is_subsumed = True
+                break
+        if not is_subsumed:
+            selected.append(path)
+
+    return selected
+
+
+# ---------------------------------------------------------------------------
+# Main Generator
+# ---------------------------------------------------------------------------
+
+class RecommendationGenerator:
+    """
+    Generates one evidence-constrained Recommendation per active StressPathway.
+
+    Workflow per pathway:
+      1. Retrieve per-edge evidence (already guaranteed ≥0.50 similarity floor).
+      2. Build ecological constraint instructions from profile.
+      3. Compute confidence_score deterministically.
+      4. Call LLM (Anthropic or Groq) with evidence-locked prompt.
+      5. Parse and validate — run ClaimValidator on generated text.
+      6. Deduplicate semantically and return finalized Recommendation objects.
+    """
+
+    def __init__(
+        self,
+        anthropic_api_key: Optional[str] = None,
+        groq_api_key: Optional[str] = None,
+    ):
+        self._provider: Optional[str] = None
+        self.client = None
+
+        # Anthropic takes precedence
+        ant_key = anthropic_api_key or settings.anthropic_api_key
+        groq_key = groq_api_key or getattr(settings, "groq_api_key", "")
+
         if ant_key:
             try:
                 import anthropic
@@ -423,26 +577,21 @@ class RecommendationGenerator:
         top_k_evidence_per_edge: int = 3,
     ) -> list[Recommendation]:
         """
-        Generates one Recommendation per pathway.
+        Generates one Recommendation per distinct pathway.
         Returns a deduplicated list of validated Recommendation objects.
         """
         if self.client is None:
             logger.warning("No LLM client — skipping recommendation generation.")
             return []
 
-        recommendations: list[Recommendation] = []
-        # Track which pathway start→terminal pairs we've already covered to avoid near-duplicate recs
-        covered_pairs: set[tuple[str, str]] = set()
+        # 1. Prune pathways that are sub-chains of longer active pathways
+        pruned_pathways = _filter_subsumed_pathways(pathways)
+        logger.info(f"Generating recommendations for {len(pruned_pathways)} non-subsumed pathways (from {len(pathways)} total).")
 
         constraint_instructions, constraint_notes_list = _build_constraint_instructions(profile)
+        candidate_recs: list[Recommendation] = []
 
-        for pathway in pathways:
-            pair = (pathway.start_variable, pathway.terminal_variable)
-            if pair in covered_pairs:
-                logger.debug(f"Skipping duplicate pathway pair {pair}")
-                continue
-            covered_pairs.add(pair)
-
+        for pathway in pruned_pathways:
             rec = self._generate_for_pathway(
                 profile=profile,
                 pathway=pathway,
@@ -451,9 +600,25 @@ class RecommendationGenerator:
                 top_k_evidence_per_edge=top_k_evidence_per_edge,
             )
             if rec is not None:
-                recommendations.append(rec)
+                candidate_recs.append(rec)
 
-        return recommendations
+        # 2. Semantic text deduplication pass
+        final_recs: list[Recommendation] = []
+        for cand in candidate_recs:
+            is_dup = False
+            for i, kept in enumerate(final_recs):
+                sim = _compute_text_jaccard(cand.recommendation, kept.recommendation)
+                if sim >= 0.40:
+                    logger.info(f"Duplicate recommendation detected (sim={sim:.2f}). Comparing confidence scores.")
+                    # If new recommendation has higher confidence or more affected metrics, replace
+                    if cand.confidence_score > kept.confidence_score:
+                        final_recs[i] = cand
+                    is_dup = True
+                    break
+            if not is_dup:
+                final_recs.append(cand)
+
+        return final_recs
 
     def _generate_for_pathway(
         self,
@@ -536,7 +701,11 @@ class RecommendationGenerator:
         evidence_citations: list[EvidenceCitation] = []
         for ev_dict in data.get("evidence", []):
             try:
-                evidence_citations.append(EvidenceCitation(**ev_dict))
+                evidence_citations.append(EvidenceCitation(
+                    source=_normalize_unicode(ev_dict.get("source", "")),
+                    url=ev_dict.get("url"),
+                    claim_supported=_normalize_unicode(ev_dict.get("claim_supported", ""))
+                ))
             except Exception:
                 pass
 
@@ -544,7 +713,7 @@ class RecommendationGenerator:
         if not evidence_citations and retrieved_evidence:
             for ev in retrieved_evidence[:2]:
                 evidence_citations.append(EvidenceCitation(
-                    source=ev.get("source", ""),
+                    source=_normalize_unicode(ev.get("source", "")),
                     url=ev.get("url"),
                     claim_supported="Supporting evidence for this pathway's causal mechanism.",
                 ))
@@ -569,14 +738,14 @@ class RecommendationGenerator:
             time_horizon = "medium"
 
         return Recommendation(
-            recommendation=data.get("recommendation", "").strip(),
-            why_it_works=data.get("why_it_works", "").strip(),
+            recommendation=_normalize_unicode(data.get("recommendation", "").strip()),
+            why_it_works=_normalize_unicode(data.get("why_it_works", "").strip()),
             affected_metrics=combined_metrics,
             time_horizon=time_horizon,
             evidence=evidence_citations,
             confidence_score=confidence_score,
             confidence_basis=confidence_basis,
-            constraint_notes=constraint_note,
+            constraint_notes=_normalize_unicode(constraint_note) if constraint_note else None,
             pathway_id=pathway.pathway_id,
             validation_warnings=validation_result.warnings,
         )
