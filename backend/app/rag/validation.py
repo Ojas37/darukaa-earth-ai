@@ -17,30 +17,44 @@ class ClaimValidator:
     """
     Anti-Hallucination & Scientific Grounding Verification Layer.
     Audits generated claims against retrieved scientific corpus entries to guarantee:
-    1. Quantitative figures trace to peer-reviewed excerpts.
-    2. Ungrounded figures are flagged and rewritten conservatively as qualitative guidance.
-    3. Counterpoint / tempering evidence (e.g. ev_002) is highlighted rather than obscured.
+    1. Quantitative effect-size figures (percentages, rates, measurements) trace to peer-reviewed excerpts.
+    2. Incidental numbers (time horizons, durations like '6 months', publication years, list steps) pass through untouched.
+    3. Ungrounded effect figures are flagged and rewritten conservatively as qualitative guidance.
+    4. Counterpoint / tempering evidence (e.g. ev_002) is highlighted rather than obscured.
     """
 
-    # Numbers to ignore (years, standard list indices, etc.)
-    IGNORED_NUMBER_PATTERNS = [
-        r"^(?:19|20)\d{2}$",      # Publication years like 1999, 2019, 2026
-        r"^[1-9]\.$",             # List indices like 1., 2., 3.
-        r"^v\d+$"                 # Version numbers
-    ]
+    # Regex for incidental numbers that should NOT be treated as effect claims
+    DURATION_PATTERN = re.compile(
+        r"\b(?:\d+(?:\.\d+)?|\d+\s*-\s*\d+)\s*(?:months?|weeks?|days?|years?|decades?|seasons?|hrs?|hours?)\b",
+        re.IGNORECASE
+    )
+    YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
+    LIST_STEP_PATTERN = re.compile(r"(?:^|\s)(?:step\s*\d+|\d+\.)(?:\s|$)", re.IGNORECASE)
+
+    # Patterns indicating quantitative effect claims:
+    # 1. Percentages (e.g. 59%, 35%, 48.5%)
+    # 2. Measurements with units (e.g. 70mm, 2-5.6 degrees C, 1.5 t C/ha)
+    # 3. Large statistical counts / sample sizes (e.g. 1,705, 50,000)
+    # 4. Multipliers / fold-changes (e.g. 2-fold, 3x)
+    PERCENT_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\s*%", re.IGNORECASE)
+    MEASUREMENT_PATTERN = re.compile(
+        r"\b\d+(?:\.\d+)?(?:\s*-\s*\d+(?:\.\d+)?)?\s*(?:mm|millimeters|cm|°C|degrees\s*c|t\s*c/ha|g/cm3|fold|times)\b",
+        re.IGNORECASE
+    )
+    LARGE_STAT_COUNT_PATTERN = re.compile(r"\b\d{1,3}(?:,\d{3})+\b")
 
     def validate_claim(self, claim_text: str, retrieved_entries: List[Dict[str, Any]]) -> ValidationResult:
         """
         Validates a claim against retrieved scientific evidence entries.
         """
-        extracted_claim_numbers = self._extract_numbers(claim_text)
+        extracted_claim_numbers = self._extract_effect_numbers(claim_text)
         evidence_corpus_text = " ".join([e.get("summary", "") for e in retrieved_entries])
-        evidence_numbers = self._extract_numbers(evidence_corpus_text)
+        evidence_numbers = self._extract_effect_numbers(evidence_corpus_text)
 
         supported_numbers: List[str] = []
         unsupported_numbers: List[str] = []
 
-        # Check each number in the claim
+        # Check each effect number in the claim
         for num in extracted_claim_numbers:
             if self._is_number_supported(num, evidence_corpus_text, evidence_numbers):
                 supported_numbers.append(num)
@@ -83,37 +97,56 @@ class ClaimValidator:
             warnings=warnings
         )
 
-    def _extract_numbers(self, text: str) -> List[str]:
+    def _extract_effect_numbers(self, text: str) -> List[str]:
         """
-        Extracts numbers, percentages, fractions, and ranges from text.
+        Extracts quantitative effect figures (percentages, metrics, large counts, fold-changes)
+        while explicitly excluding time horizons, durations (e.g. '6 months', '2-3 years'),
+        publication years (e.g. '2019'), and list enumerations.
         """
-        raw_matches = re.findall(r"\b(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s*-\s*(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?))?\s*%?", text)
-        
-        cleaned = []
-        for m in raw_matches:
-            m_str = m.strip()
-            # Ignore year numbers (e.g. 2018, 2024) or single-digit list numbers
-            if any(re.match(p, m_str) for p in self.IGNORED_NUMBER_PATTERNS):
-                continue
-            if len(m_str) > 0:
-                cleaned.append(m_str)
-        return list(set(cleaned))
+        effect_numbers = set()
+
+        # 1. Extract percentages (e.g. 59%, 35%, 45%)
+        for m in self.PERCENT_PATTERN.finditer(text):
+            effect_numbers.add(m.group(0).strip())
+
+        # 2. Extract measurements with units (e.g. 70mm, 2-5.6 degrees C)
+        for m in self.MEASUREMENT_PATTERN.finditer(text):
+            effect_numbers.add(m.group(0).strip())
+
+        # 3. Extract large counts / sample sizes (e.g. 1,705, 50,000)
+        for m in self.LARGE_STAT_COUNT_PATTERN.finditer(text):
+            effect_numbers.add(m.group(0).strip())
+
+        # 4. Check for unattached naked numbers representing effect claims (e.g. "raised by 45")
+        # Mask out durations, years, and list steps first
+        masked_text = self.DURATION_PATTERN.sub(" [DURATION] ", text)
+        masked_text = self.YEAR_PATTERN.sub(" [YEAR] ", masked_text)
+        masked_text = self.LIST_STEP_PATTERN.sub(" [STEP] ", masked_text)
+
+        # Find any remaining naked effect percentages/decimals in masked text
+        for m in re.finditer(r"\b(?:\d+\.\d+|\d{2,})\b", masked_text):
+            val = m.group(0).strip()
+            # If not already captured and not a year
+            if not any(val in en for en in effect_numbers):
+                effect_numbers.add(val)
+
+        return sorted(list(effect_numbers))
 
     def _is_number_supported(self, candidate_num: str, evidence_text: str, evidence_numbers: List[str]) -> bool:
         """
         Checks if candidate_num is directly present or mathematically encompassed in the evidence.
         """
-        # Exact match
-        if candidate_num in evidence_text:
+        # Exact match in raw text or evidence numbers
+        if candidate_num.lower() in evidence_text.lower():
             return True
 
-        # Normalized match (strip % or commas)
-        cand_clean = candidate_num.replace("%", "").replace(",", "").strip()
+        # Normalized match (strip % or commas or spaces)
+        cand_clean = candidate_num.replace("%", "").replace(",", "").strip().lower()
         for ev_num in evidence_numbers:
-            ev_clean = ev_num.replace("%", "").replace(",", "").strip()
+            ev_clean = ev_num.replace("%", "").replace(",", "").strip().lower()
             if cand_clean == ev_clean:
                 return True
-            # Check range inclusion: e.g. "76" within "76-80"
+            # Check range inclusion: e.g. "76" within "76-80" or "2" within "2-5.6"
             if "-" in ev_clean:
                 parts = ev_clean.split("-")
                 if len(parts) == 2 and cand_clean in [p.strip() for p in parts]:
@@ -123,14 +156,18 @@ class ClaimValidator:
 
     def _rewrite_qualitatively(self, text: str, ungrounded_numbers: List[str]) -> str:
         """
-        Converts ungrounded quantitative assertions into scientifically safe qualitative guidance.
+        Converts ungrounded quantitative effect assertions into scientifically safe qualitative guidance,
+        preserving durations (e.g. 'over 6 months') and non-effect text intact.
         """
         rewritten = text
         for num in ungrounded_numbers:
-            # Replace expressions like "by 48.5%" or "48.5%" with "substantially" or "measurably"
-            rewritten = re.sub(rf"(?:by|at|around|approx(?:imately)?\s*)?{re.escape(num)}\s*%?", "substantially ", rewritten, flags=re.IGNORECASE)
-            rewritten = re.sub(rf"\b{re.escape(num)}\b", "measurable ", rewritten)
-        
+            # Replace expressions like "improving yield by 45%" with "improving yield substantially"
+            # or "by 45%" with "substantially"
+            pattern = rf"(?:\b(?:by|at|around|approx(?:imately)?)\s+)?{re.escape(num)}"
+            rewritten = re.sub(pattern, "substantially", rewritten, flags=re.IGNORECASE)
+            # If naked number remained
+            rewritten = re.sub(rf"\b{re.escape(num)}\b", "measurable", rewritten)
+
         # Clean up double words and spacing
         rewritten = re.sub(r"\bsubstantially\s+substantially\b", "substantially", rewritten, flags=re.IGNORECASE)
         rewritten = re.sub(r"\s+", " ", rewritten).strip()
