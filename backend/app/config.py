@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")
     anthropic_api_key: str = Field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
     anthropic_model: str = Field(default="claude-3-5-sonnet-20241022")
+    groq_api_key: str = Field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
     database_url: str = Field(default="sqlite+aiosqlite:///./daruka.db")
     chroma_db_dir: str = Field(default="./data/knowledge/chroma")
     log_level: str = Field(default="INFO")

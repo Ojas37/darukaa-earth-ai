@@ -10,8 +10,11 @@ logger = logging.getLogger(__name__)
 class EvidenceRetriever:
     """
     Retrieves scientific evidence entries from ChromaDB with metadata pre-filtering,
-    per-edge coverage guarantees, and cosine semantic similarity ranking.
+    per-edge coverage guarantees, similarity score floor thresholding,
+    and cosine semantic similarity ranking.
     """
+
+    DEFAULT_SIMILARITY_FLOOR: float = 0.50
 
     def __init__(self, chroma_dir: Optional[str] = None, collection_name: str = "daruka_evidence"):
         self.ingestor = EvidenceIngestor(chroma_dir=chroma_dir, collection_name=collection_name)
@@ -39,18 +42,15 @@ class EvidenceRetriever:
         biome: Optional[str] = None,
         climate_zone: Optional[str] = None,
         edge_ids: Optional[List[str]] = None,
-        top_k: int = 5
+        top_k: int = 5,
+        min_similarity: float = 0.50
     ) -> List[Dict[str, Any]]:
         """
         Retrieves relevant scientific evidence entries.
         
-        When edge_ids is provided:
-        - Guarantees at least 1-2 pieces of evidence per active edge_id (if present in corpus).
-        - Merges and deduplicates across edges.
-        - Ranks by similarity while preserving edge coverage.
-        
-        When edge_ids is not provided:
-        - Filters candidate IDs by biome/climate_zone and ranks top_k by semantic similarity.
+        - Enforces a minimum similarity floor (default 0.50) to reject poor matches and avoid forced citations.
+        - When edge_ids is provided: guarantees coverage across active edges (above floor).
+        - When edge_ids is omitted: global filtered similarity retrieval above floor.
         """
         if not self._corpus_cache:
             self._load_corpus_cache()
@@ -64,7 +64,8 @@ class EvidenceRetriever:
                 edge_ids=edge_ids,
                 biome=biome,
                 climate_zone=climate_zone,
-                top_k=top_k
+                top_k=top_k,
+                min_similarity=min_similarity
             )
 
         # -----------------------------------------------------------------
@@ -78,7 +79,7 @@ class EvidenceRetriever:
 
         query_params: Dict[str, Any] = {
             "query_texts": [query],
-            "n_results": min(top_k, max(len(candidate_ids) if candidate_ids is not None else self.collection.count(), 1))
+            "n_results": min(top_k * 2, max(len(candidate_ids) if candidate_ids is not None else self.collection.count(), 1))
         }
 
         if candidate_ids is not None:
@@ -87,7 +88,11 @@ class EvidenceRetriever:
             query_params["where"] = {"id": {"$in": list(candidate_ids)}}
 
         results = self.collection.query(**query_params)
-        return self._format_chroma_results(results)[:top_k]
+        all_results = self._format_chroma_results(results)
+        
+        # Apply similarity floor
+        filtered_results = [r for r in all_results if r.get("similarity_score", 0.0) >= min_similarity]
+        return filtered_results[:top_k]
 
     def _retrieve_per_edge(
         self,
@@ -95,11 +100,12 @@ class EvidenceRetriever:
         edge_ids: List[str],
         biome: Optional[str],
         climate_zone: Optional[str],
-        top_k: int
+        top_k: int,
+        min_similarity: float
     ) -> List[Dict[str, Any]]:
         """
-        Retrieves top-1 or top-2 evidence entries for EACH requested edge_id to guarantee
-        every active stress pathway has scientific backing, then merges and deduplicates.
+        Retrieves top-1 or top-2 evidence entries for EACH requested edge_id that meet
+        or exceed the minimum similarity floor, preventing forced low-quality citations.
         """
         retrieved_map: Dict[str, Dict[str, Any]] = {}
 
@@ -145,9 +151,11 @@ class EvidenceRetriever:
             edge_results = self._format_chroma_results(results)
 
             for entry in edge_results:
-                eid = entry["id"]
-                if eid not in retrieved_map or entry.get("similarity_score", 0.0) > retrieved_map[eid].get("similarity_score", 0.0):
-                    retrieved_map[eid] = entry
+                # Apply similarity floor
+                if entry.get("similarity_score", 0.0) >= min_similarity:
+                    eid = entry["id"]
+                    if eid not in retrieved_map or entry.get("similarity_score", 0.0) > retrieved_map[eid].get("similarity_score", 0.0):
+                        retrieved_map[eid] = entry
 
         # Collect unique entries across all edges
         all_edge_entries = list(retrieved_map.values())
@@ -156,7 +164,6 @@ class EvidenceRetriever:
         all_edge_entries.sort(key=lambda x: x.get("similarity_score", 0.0), reverse=True)
 
         # If more entries were retrieved than top_k, ensure we still preserve edge coverage
-        # by selecting at least one entry per edge before truncating
         if len(all_edge_entries) > top_k:
             covered_edges = set()
             selected_entries = []
@@ -164,14 +171,12 @@ class EvidenceRetriever:
 
             for entry in all_edge_entries:
                 entry_edges = set(entry.get("edge_ids", []))
-                # If this entry covers an edge not yet covered
                 if any(e in edge_ids and e not in covered_edges for e in entry_edges):
                     selected_entries.append(entry)
                     covered_edges.update(entry_edges)
                 else:
                     remaining_entries.append(entry)
 
-            # Fill up to top_k if room remains
             for entry in remaining_entries:
                 if len(selected_entries) < top_k:
                     selected_entries.append(entry)

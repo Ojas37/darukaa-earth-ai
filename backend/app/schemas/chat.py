@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from app.schemas.profile import EnvironmentalProfile
 from app.reasoning.relationship_graph import StressPathway
+from app.recommendations.generator import Recommendation
 
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(default=None, description="Unique conversation session ID. If omitted, a new one is created.")
@@ -24,5 +25,5 @@ class ChatResponse(BaseModel):
     extracted_variables: Dict[str, Any] = Field(default_factory=dict)
     active_stress_pathways: List[StressPathway] = Field(default_factory=list)
     retrieved_evidence: List[Dict[str, Any]] = Field(default_factory=list)
-    recommendations: List[Dict[str, Any]] = Field(default_factory=list)
+    recommendations: List[Recommendation] = Field(default_factory=list)
     clarification_prompt: Optional[str] = None

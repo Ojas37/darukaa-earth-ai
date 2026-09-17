@@ -1,0 +1,1 @@
+from app.recommendations.generator import RecommendationGenerator, Recommendation
