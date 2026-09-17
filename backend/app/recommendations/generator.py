@@ -32,7 +32,7 @@ from app.rag.validation import claim_validator
 from app.config import settings
 
 # Groq model to use when ANTHROPIC_API_KEY is absent
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 logger = logging.getLogger(__name__)
 
@@ -408,7 +408,7 @@ class RecommendationGenerator:
         elif self._provider == "groq":
             response = self.client.chat.completions.create(
                 model=GROQ_MODEL,
-                max_tokens=900,
+                max_tokens=1500,
                 temperature=0.15,
                 messages=[{"role": "user", "content": prompt}],
             )
