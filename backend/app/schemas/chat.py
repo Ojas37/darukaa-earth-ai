@@ -1,6 +1,7 @@
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from app.schemas.profile import EnvironmentalProfile
+from app.reasoning.relationship_graph import StressPathway
 
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(default=None, description="Unique conversation session ID. If omitted, a new one is created.")
@@ -21,5 +22,7 @@ class ChatResponse(BaseModel):
     missing_information: List[MissingInfoItem] = Field(default_factory=list)
     profile_summary: Dict[str, Any] = Field(default_factory=dict)
     extracted_variables: Dict[str, Any] = Field(default_factory=dict)
+    active_stress_pathways: List[StressPathway] = Field(default_factory=list)
+    retrieved_evidence: List[Dict[str, Any]] = Field(default_factory=list)
     recommendations: List[Dict[str, Any]] = Field(default_factory=list)
     clarification_prompt: Optional[str] = None
