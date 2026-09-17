@@ -88,8 +88,12 @@ Most generative AI applications treat ecological questions as generic conversati
 ### 1. No LLM-Only Hallucinations
 The Large Language Model is isolated to language understanding, synthesis, and explanation. Factual reasoning, stress detection, causal propagation, and metric mapping are driven by the structured environmental profile, the ecological relationship graph, and the verified scientific knowledge base.
 
-### 2. Multi-Metric Co-dependency
-An intervention is never evaluated in isolation. A soil carbon improvement strategy (e.g., high-biomass cover crops) is dynamically checked against local precipitation constraints, soil pH, and land-use intensity to avoid recommending water-intensive crops in semi-arid zones.
+### 2. Multi-Metric Co-dependency & Causal Stress Pathways
+An intervention is never evaluated in isolation or for a single metric. 
+- **Causal Graph Modeling**: An explicit 12-edge ecological graph models multi-hop cascades (e.g. $\text{SOC} \to \text{Infiltration} \to \text{Moisture Deficit} \to \text{Pollinator Food Scarcity} \to \text{Pollinator Decline}$).
+- **Maximal Pathway Subsumption**: When multiple sub-chains share the same causal lineage and terminal outcome, the engine automatically selects the maximal root-to-terminal chain. This ensures recommendations tackle root causes (e.g., soil organic carbon building) rather than cosmetic symptoms (e.g., watering downstream). Parallel distinct pathways targeting the same outcome (e.g., pesticide toxicity vs. habitat homogenization $\to$ species richness) are preserved and addressed independently.
+- **Ecological Constraint Enforcement**: Strategies are cross-checked against biophysical guardrails (e.g. zero irrigation in semi-arid zones, no-till on fragile low-SOC soils).
+- **Study-Weighted Confidence Scoring**: Confidence combines profile data completeness, edge directness, and evidence study design (meta-analyses and institutional IPCC/FAO assessments are weighted above single-site trials).
 
 ### 3. Transparent Evidence & Uncertainty
 Every recommendation exposes:
