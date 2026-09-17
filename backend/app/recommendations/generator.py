@@ -332,7 +332,7 @@ def _build_evidence_block(retrieved_evidence: list[dict]) -> str:
         caveat = ev.get("caveat") or ""
         caveat_str = f"\n   CAVEAT: {caveat}" if caveat else ""
         lines.append(
-            f"[EV-{i}] ID={ev.get('id')} | Source: {ev.get('source')}\n"
+            f"[EV-{i}] ID={ev.get('id')} | Source: {ev.get('source')} | URL: {ev.get('url')}\n"
             f"   Summary: {ev.get('summary')}{caveat_str}"
         )
     return "\n\n".join(lines) if lines else "No direct evidence retrieved for this pathway."
@@ -383,9 +383,8 @@ Return ONLY valid JSON (no markdown fences) matching this exact schema:
   "time_horizon": "short" | "medium" | "long",
   "evidence": [
     {{
-      "source": "<author/journal>",
-      "url": "<url if available>",
-      "claim_supported": "<exact quantitative figure from your recommendation text that this entry supports>"
+      "evidence_id": "<ID of the cited entry, e.g. ev_001>",
+      "claim_supported": "<exact quantitative figure or qualitative effect supported>"
     }}
   ],
   "constraint_notes": "<null or brief note if a water-intensive or ecologically incompatible option was excluded>"
@@ -394,39 +393,10 @@ Return ONLY valid JSON (no markdown fences) matching this exact schema:
 Rules:
 - affected_metrics must contain at least 2 node paths from the pathway chain above.
 - time_horizon: "short" = 0–2 years, "medium" = 2–5 years, "long" = 5+ years.
-- evidence array may be empty if you made no quantitative claims.
+- In the evidence array, use the exact evidence_id (e.g. ev_001, ev_008) from the permitted sources above.
 - Do NOT include confidence_score or validation_warnings — those are computed separately.
 - Output raw JSON only. No explanatory text."""
 
-
-# ---------------------------------------------------------------------------
-# Main Generator
-# ---------------------------------------------------------------------------
-
-class RecommendationGenerator:
-    """
-    Generates one evidence-constrained Recommendation per active StressPathway.
-
-    Workflow per pathway:
-      1. Retrieve per-edge evidence (already guaranteed ≥0.50 similarity floor).
-      2. Build ecological constraint instructions from profile.
-      3. Compute confidence_score deterministically.
-      4. Call LLM (Anthropic or Groq) with evidence-locked prompt.
-      5. Parse and validate — run ClaimValidator on generated text.
-      6. Return finalised Recommendation or None if generation failed.
-    """
-
-    def __init__(
-        self,
-        anthropic_api_key: Optional[str] = None,
-        groq_api_key: Optional[str] = None,
-    ):
-        self._provider: Optional[str] = None
-        self.client = None
-
-        # Anthropic takes precedence
-        ant_key = anthropic_api_key or settings.anthropic_api_key
-        groq_key = groq_api_key or getattr(settings, "groq_api_key", "")
 
 # ---------------------------------------------------------------------------
 # Deduplication Helpers
@@ -562,7 +532,7 @@ class RecommendationGenerator:
         elif self._provider == "groq":
             response = self.client.chat.completions.create(
                 model=GROQ_MODEL,
-                max_tokens=1500,
+                max_tokens=3000,
                 temperature=0.15,
                 response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": prompt}],
@@ -707,26 +677,31 @@ class RecommendationGenerator:
             data["recommendation"] = ". ".join(sentences[:mid]) + "."
             data["why_it_works"] = ". ".join(sentences[mid:]) + "." if sentences[mid:] else data.get("why_it_works", "")
 
-        # 6. Build evidence citations from retrieved entries
+        # 6. Build evidence citations with hard provenance check
+        raw_citations = data.get("evidence", [])
+        verified_cits, cit_warnings = claim_validator.validate_citations(
+            raw_citations, retrieved_evidence
+        )
+
+        # Fall back: if LLM returned no citations but we have retrieved evidence, attach top entries
+        if not verified_cits and retrieved_evidence:
+            for ev in retrieved_evidence[:2]:
+                verified_cits.append({
+                    "source": ev.get("source", ""),
+                    "url": ev.get("url"),
+                    "claim_supported": "Supporting evidence for this pathway's causal mechanism.",
+                })
+
         evidence_citations: list[EvidenceCitation] = []
-        for ev_dict in data.get("evidence", []):
+        for vc in verified_cits:
             try:
                 evidence_citations.append(EvidenceCitation(
-                    source=_normalize_unicode(ev_dict.get("source", "")),
-                    url=ev_dict.get("url"),
-                    claim_supported=_normalize_unicode(ev_dict.get("claim_supported", ""))
+                    source=_normalize_unicode(vc.get("source", "")),
+                    url=vc.get("url"),
+                    claim_supported=_normalize_unicode(vc.get("claim_supported", ""))
                 ))
             except Exception:
                 pass
-
-        # Fall back: if LLM returned no citations but we have retrieved evidence, attach top entries
-        if not evidence_citations and retrieved_evidence:
-            for ev in retrieved_evidence[:2]:
-                evidence_citations.append(EvidenceCitation(
-                    source=_normalize_unicode(ev.get("source", "")),
-                    url=ev.get("url"),
-                    claim_supported="Supporting evidence for this pathway's causal mechanism.",
-                ))
 
         # 7. Build affected_metrics — merge LLM output with pathway nodes as ground truth
         llm_metrics = data.get("affected_metrics", [])
@@ -747,6 +722,8 @@ class RecommendationGenerator:
         if time_horizon not in valid_horizons:
             time_horizon = "medium"
 
+        all_warnings = list(dict.fromkeys(validation_result.warnings + cit_warnings))
+
         return Recommendation(
             recommendation=_normalize_unicode(data.get("recommendation", "").strip()),
             why_it_works=_normalize_unicode(data.get("why_it_works", "").strip()),
@@ -757,7 +734,7 @@ class RecommendationGenerator:
             confidence_basis=confidence_basis,
             constraint_notes=_normalize_unicode(constraint_note) if constraint_note else None,
             pathway_id=pathway.pathway_id,
-            validation_warnings=validation_result.warnings,
+            validation_warnings=all_warnings,
         )
 
 

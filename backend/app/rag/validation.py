@@ -161,16 +161,70 @@ class ClaimValidator:
         """
         rewritten = text
         for num in ungrounded_numbers:
-            # Replace expressions like "improving yield by 45%" with "improving yield substantially"
-            # or "by 45%" with "substantially"
             pattern = rf"(?:\b(?:by|at|around|approx(?:imately)?)\s+)?{re.escape(num)}"
             rewritten = re.sub(pattern, "substantially", rewritten, flags=re.IGNORECASE)
-            # If naked number remained
             rewritten = re.sub(rf"\b{re.escape(num)}\b", "measurable", rewritten)
 
-        # Clean up double words and spacing
         rewritten = re.sub(r"\bsubstantially\s+substantially\b", "substantially", rewritten, flags=re.IGNORECASE)
         rewritten = re.sub(r"\s+", " ", rewritten).strip()
         return rewritten
+
+    def validate_citations(
+        self,
+        citations: List[Dict[str, Any]],
+        retrieved_entries: List[Dict[str, Any]]
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """
+        Hard check for citation provenance:
+        Asserts that every citation url matches a verified URL from the retrieved evidence entries.
+        Replaces hallucinated or generated URLs with the exact corpus URL, or drops unverified citations.
+        """
+        warnings = []
+        verified_citations = []
+
+        retrieved_by_id = {e.get("id"): e for e in retrieved_entries if e.get("id")}
+        retrieved_urls = {e.get("url") for e in retrieved_entries if e.get("url")}
+
+        for cit in citations:
+            source = cit.get("source", "")
+            url = cit.get("url")
+            claim_supported = cit.get("claim_supported", "")
+            evidence_id = cit.get("evidence_id")
+
+            matched_entry = None
+            if evidence_id and evidence_id in retrieved_by_id:
+                matched_entry = retrieved_by_id[evidence_id]
+            else:
+                for e in retrieved_entries:
+                    e_src = e.get("source", "")
+                    if e_src == source or (source and (source.lower() in e_src.lower() or e_src.lower() in source.lower())):
+                        matched_entry = e
+                        break
+                    s_author = source.split(",")[0].split()[0].lower() if source else ""
+                    e_author = e_src.split(",")[0].split()[0].lower() if e_src else ""
+                    if s_author and len(s_author) > 3 and s_author == e_author:
+                        matched_entry = e
+                        break
+
+            if matched_entry:
+                correct_url = matched_entry.get("url")
+                if url and url != correct_url:
+                    warnings.append(
+                        f"Citation URL provenance corrected for '{matched_entry.get('id')}': replaced unverified '{url}' with verified corpus URL '{correct_url}'."
+                    )
+                verified_citations.append({
+                    "source": matched_entry.get("source", source),
+                    "url": correct_url,
+                    "claim_supported": claim_supported or "Supporting evidence for this pathway's causal mechanism."
+                })
+            else:
+                if url and url in retrieved_urls:
+                    verified_citations.append(cit)
+                else:
+                    warnings.append(
+                        f"Unverified citation dropped: '{source}' ({url}) does not match any retrieved evidence entry."
+                    )
+
+        return verified_citations, warnings
 
 claim_validator = ClaimValidator()
