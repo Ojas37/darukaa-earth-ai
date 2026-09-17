@@ -12,6 +12,9 @@ from app.rag.validation import claim_validator
 from app.memory.session import session_manager
 from app.recommendations.generator import recommendation_generator, Recommendation
 
+from app.schemas.response import StructuredReportResponse, ProfileSummaryResponse, OverallConfidence
+from app.recommendations.formatter import build_structured_report
+
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger("daruka.app")
 
@@ -54,7 +57,9 @@ async def chat_turn(request: ChatRequest):
     5. If sufficient info is present:
        a. Evaluates active causal stress pathways via Environmental Relationship Graph.
        b. Retrieves peer-reviewed scientific evidence filtered by biome, climate, and active edge IDs.
-    6. Returns structured response with profile summary, active pathways, and scientific citations.
+       c. Generates multi-metric, evidence-constrained recommendations.
+       d. Compiles comprehensive StructuredReportResponse.
+    6. Returns structured response with chat bubble text, structured report, and markdown view.
     """
     session = session_manager.get_or_create_session(request.conversation_id)
     session.add_message(role="user", content=request.message)
@@ -69,6 +74,7 @@ async def chat_turn(request: ChatRequest):
     active_pathways: list[StressPathway] = []
     retrieved_evidence: list[dict] = []
     recommendations: list[Recommendation] = []
+    report: Optional[StructuredReportResponse] = None
 
     # 3. Construct response message
     if needs_clarification:
@@ -89,41 +95,21 @@ async def chat_turn(request: ChatRequest):
             top_k=5
         )
 
-        summary_items = [f"• {k.replace('_', ' ').title()}: {v}" for k, v in session.profile.to_summary_dict().items()]
-        summary_str = "\n".join(summary_items)
-
-        pathway_lines = []
-        for p in active_pathways:
-            pathway_lines.append(f"• **{p.pathway_id.upper()}**: `{p.summary}` ({p.confidence.value} confidence)")
-        pathways_str = "\n".join(pathway_lines) if pathway_lines else "None detected (ecosystem indicators within healthy thresholds)."
-
-        evidence_lines = []
-        for ev in retrieved_evidence[:3]:
-            evidence_lines.append(f"• **{ev.get('id')}**: *{ev.get('topic')}* — {ev.get('source')} ([Source]({ev.get('url')}))")
-        evidence_str = "\n".join(evidence_lines) if evidence_lines else "No specific evidence filtered."
-
         # Generate multi-metric recommendations (one per pathway)
         recommendations = recommendation_generator.generate(
             profile=session.profile,
             pathways=active_pathways,
         )
 
-        rec_lines = []
-        for rec in recommendations:
-            horizon_tag = f"[{rec.time_horizon.upper()}]"
-            conf_tag = f"conf={rec.confidence_score:.2f}"
-            rec_lines.append(
-                f"• {horizon_tag} **{rec.recommendation[:120]}{'...' if len(rec.recommendation) > 120 else ''}** "
-                f"— affects: `{'`, `'.join(rec.affected_metrics[:3])}`  ({conf_tag})"
-            )
-        recs_str = "\n".join(rec_lines) if rec_lines else "No recommendations generated (insufficient evidence coverage)."
-
-        response_text = (
-            f"**Environmental Profile Established:**\n\n{summary_str}\n\n"
-            f"**Active Ecological Stress Pathways ({len(active_pathways)} detected):**\n{pathways_str}\n\n"
-            f"**Retrieved Scientific Grounding ({len(retrieved_evidence)} sources):**\n{evidence_str}\n\n"
-            f"**Evidence-Backed Recommendations ({len(recommendations)} generated):**\n{recs_str}"
+        # Build complete typed and formatted report
+        report = build_structured_report(
+            conversation_id=session.conversation_id,
+            profile=session.profile,
+            pathways=active_pathways,
+            recommendations=recommendations,
         )
+        session.latest_report_json = report.model_dump_json()
+        response_text = report.formatted_text
 
     session.add_message(role="assistant", content=response_text)
     session_manager.save_session(session)
@@ -139,8 +125,41 @@ async def chat_turn(request: ChatRequest):
         active_stress_pathways=active_pathways,
         retrieved_evidence=retrieved_evidence,
         recommendations=recommendations,
-        clarification_prompt=clarification_prompt
+        clarification_prompt=clarification_prompt,
+        report=report,
+        formatted_text=report.formatted_text if report else None,
+        narrative_summary=report.narrative_summary if report else None,
+        overall_confidence=report.overall_confidence if report else None,
     )
+
+@app.get("/api/v1/report/{conversation_id}", response_model=StructuredReportResponse, tags=["Reports"])
+async def get_report(conversation_id: str):
+    """
+    Generates and returns the full standalone StructuredReportResponse for a conversation
+    without requiring a chat turn. Returns cached report if already generated.
+    """
+    session = session_manager.get_or_create_session(conversation_id)
+    if session.latest_report_json:
+        return StructuredReportResponse.model_validate_json(session.latest_report_json)
+
+    if not session.messages and not any(v.is_known for v in session.profile.soil.__dict__.values() if hasattr(v, "is_known")):
+        raise HTTPException(status_code=404, detail=f"No active environmental profile found for session '{conversation_id}'")
+
+    active_pathways = relationship_graph.find_stress_pathways(session.profile, min_length=2)
+    recommendations = recommendation_generator.generate(
+        profile=session.profile,
+        pathways=active_pathways,
+    )
+
+    report = build_structured_report(
+        conversation_id=session.conversation_id,
+        profile=session.profile,
+        pathways=active_pathways,
+        recommendations=recommendations,
+    )
+    session.latest_report_json = report.model_dump_json()
+    session_manager.save_session(session)
+    return report
 
 @app.get("/api/v1/environment/{conversation_id}", response_model=EnvironmentalProfile, tags=["Environmental Profile"])
 async def get_environment_profile(conversation_id: str):

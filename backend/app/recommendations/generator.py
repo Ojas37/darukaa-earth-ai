@@ -564,6 +564,7 @@ class RecommendationGenerator:
                 model=GROQ_MODEL,
                 max_tokens=1500,
                 temperature=0.15,
+                response_format={"type": "json_object"},
                 messages=[{"role": "user", "content": prompt}],
             )
             return response.choices[0].message.content.strip()
@@ -603,14 +604,21 @@ class RecommendationGenerator:
                 candidate_recs.append(rec)
 
         # 2. Semantic text deduplication pass
+        terminal_map = {p.pathway_id: p.terminal_variable for p in pathways}
+
         final_recs: list[Recommendation] = []
         for cand in candidate_recs:
             is_dup = False
+            cand_term = terminal_map.get(cand.pathway_id, "")
             for i, kept in enumerate(final_recs):
+                kept_term = terminal_map.get(kept.pathway_id, "")
                 sim = _compute_text_jaccard(cand.recommendation, kept.recommendation)
-                if sim >= 0.40:
-                    logger.info(f"Duplicate recommendation detected (sim={sim:.2f}). Comparing confidence scores.")
-                    # If new recommendation has higher confidence or more affected metrics, replace
+                
+                # Same terminal outcome: merge if Jaccard >= 0.50
+                # Different terminal outcome: only merge if near-verbatim duplicate (>= 0.65)
+                threshold = 0.50 if (cand_term and cand_term == kept_term) else 0.65
+                if sim >= threshold:
+                    logger.info(f"Duplicate recommendation detected (sim={sim:.2f}, threshold={threshold}). Comparing confidence scores.")
                     if cand.confidence_score > kept.confidence_score:
                         final_recs[i] = cand
                     is_dup = True
@@ -651,7 +659,7 @@ class RecommendationGenerator:
         # 2. Deterministic confidence score
         confidence_score, confidence_basis = _compute_confidence(pathway, profile, retrieved_evidence)
 
-        # 3. Build prompt and call LLM
+        # 3. Build prompt and call LLM (with 1 retry on JSON error)
         prompt = _build_generation_prompt(
             profile=profile,
             pathway=pathway,
@@ -659,24 +667,26 @@ class RecommendationGenerator:
             constraint_instructions=constraint_instructions,
         )
 
-        try:
-            raw_text = self._call_llm(prompt)
-        except Exception as e:
-            logger.error(f"LLM call failed for {pathway.pathway_id}: {e}")
-            return None
+        data = None
+        for attempt in range(2):
+            try:
+                raw_text = self._call_llm(prompt)
+                cleaned = raw_text
+                for fence in ("```json", "```"):
+                    if cleaned.startswith(fence):
+                        cleaned = cleaned[len(fence):]
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
+                cleaned = cleaned.strip()
+                data = json.loads(cleaned)
+                break
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} generation failed for {pathway.pathway_id}: {e}")
+                if attempt == 1:
+                    logger.error(f"Generation failed after retry for {pathway.pathway_id}")
+                    return None
 
-        # 4. Parse JSON
-        try:
-            cleaned = raw_text
-            for fence in ("```json", "```"):
-                if cleaned.startswith(fence):
-                    cleaned = cleaned[len(fence):]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            cleaned = cleaned.strip()
-            data = json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parse error for {pathway.pathway_id}: {e}\nRaw:\n{raw_text[:300]}")
+        if not data:
             return None
 
         # 5. Validate & possibly rewrite quantitative claims

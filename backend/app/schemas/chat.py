@@ -15,6 +15,8 @@ class MissingInfoItem(BaseModel):
     priority: int = Field(default=1, description="1 is highest priority")
     reason: str = Field(..., description="Ecological rationale for why this variable is needed")
 
+from app.schemas.response import StructuredReportResponse, OverallConfidence
+
 class ChatResponse(BaseModel):
     conversation_id: str
     turn_index: int
@@ -27,3 +29,7 @@ class ChatResponse(BaseModel):
     retrieved_evidence: List[Dict[str, Any]] = Field(default_factory=list)
     recommendations: List[Recommendation] = Field(default_factory=list)
     clarification_prompt: Optional[str] = None
+    report: Optional[StructuredReportResponse] = None
+    formatted_text: Optional[str] = None
+    narrative_summary: Optional[str] = None
+    overall_confidence: Optional[OverallConfidence] = None

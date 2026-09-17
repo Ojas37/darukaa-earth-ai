@@ -11,6 +11,7 @@ class ConversationSession:
         self.conversation_id = conversation_id
         self.profile = profile or EnvironmentalProfile()
         self.messages: List[Dict[str, str]] = []
+        self.latest_report_json: Optional[str] = None
         self.created_at = datetime.utcnow().isoformat()
         self.updated_at = datetime.utcnow().isoformat()
 
