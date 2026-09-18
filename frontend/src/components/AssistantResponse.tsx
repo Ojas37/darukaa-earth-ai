@@ -21,7 +21,7 @@ export const AssistantResponse: React.FC<AssistantResponseProps> = ({
   // If this turn requires clarification
   if (response.needs_clarification) {
     return (
-      <div className="space-y-4 max-w-4xl">
+      <div className="space-y-4 max-w-4xl mx-auto w-full">
         <ClarificationPrompt
           message={response.message || response.clarification_prompt || ''}
           missingInfo={response.missing_information}
@@ -60,49 +60,52 @@ export const AssistantResponse: React.FC<AssistantResponseProps> = ({
   };
 
   return (
-    <div className="space-y-5 max-w-4xl">
-      {/* Overall Synthesis Banner & Confidence */}
-      <div className="bg-white border border-sage-200 rounded-xl p-4 sm:p-5 shadow-subtle space-y-4">
+    <div className="space-y-5 max-w-4xl mx-auto w-full">
+      {/* Overall Synthesis Banner */}
+      <div className="bg-white border border-sage-200 rounded-2xl p-5 sm:p-6 shadow-card space-y-4">
+        {/* Header with Title and Confidence */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-sage-100">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-botanical-500 flex items-center justify-center text-white shadow-2xs">
-              <Sparkles className="w-4 h-4" />
+          <div className="flex items-center space-x-3 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-botanical-500 flex items-center justify-center text-white shadow-subtle shrink-0">
+              <Sparkles className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="text-sm sm:text-base font-semibold text-forest-900">
+            <div className="flex-1 min-w-0">
+              <h3 className="text-base sm:text-lg font-bold text-forest-900 leading-tight">
                 Ecological Diagnostic & Intervention Report
               </h3>
-              <p className="text-[11px] text-forest-500 font-mono">
-                {recommendations.length} Verified Interventions &bull; {pathways.length} Stress Pathways
+              <p className="text-xs text-forest-500 font-mono mt-0.5">
+                {recommendations.length} Verified Intervention{recommendations.length === 1 ? '' : 's'} &bull; {pathways.length} Diagnosed Stress Pathway{pathways.length === 1 ? '' : 's'}
               </p>
             </div>
           </div>
 
           {/* Overall Confidence Badge */}
           {overallConf && (
-            <div className="shrink-0">
+            <div className="shrink-0 pt-1 sm:pt-0">
               <ConfidenceIndicator
                 score={overallConf.score}
-                basis={overallConf.explanation}
                 showBar={true}
               />
             </div>
           )}
         </div>
 
-        {/* Narrative Executive Summary */}
+        {/* Executive Summary Narrative */}
         {narrative && (
-          <div className="text-xs sm:text-[13px] text-forest-800 leading-relaxed space-y-2">
-            <p className="font-sans whitespace-pre-line">{narrative}</p>
+          <div className="text-xs sm:text-sm text-forest-800 leading-relaxed font-sans bg-sand-50/60 p-4 rounded-xl border border-sage-100">
+            <p className="whitespace-pre-line leading-relaxed">{narrative}</p>
           </div>
         )}
 
         {/* Quick action: Copy Report */}
         {(response.formatted_text || response.report?.formatted_text) && (
-          <div className="flex items-center justify-end pt-1">
+          <div className="flex items-center justify-between pt-1 text-xs text-forest-500">
+            <span className="text-[11px] italic">
+              {overallConf?.explanation || 'Grounded in peer-reviewed scientific literature.'}
+            </span>
             <button
               onClick={handleCopyFormattedText}
-              className="inline-flex items-center space-x-1.5 text-xs text-forest-600 hover:text-forest-900 bg-sage-50 hover:bg-sage-100 px-3 py-1.5 rounded-md border border-sage-200 transition-colors"
+              className="inline-flex items-center space-x-1.5 text-xs font-medium text-forest-700 hover:text-forest-950 bg-sage-50 hover:bg-sage-100 px-3 py-1.5 rounded-lg border border-sage-200 transition-colors shadow-2xs shrink-0"
             >
               {copied ? (
                 <>
@@ -131,20 +134,20 @@ export const AssistantResponse: React.FC<AssistantResponseProps> = ({
 
       {/* Recommendation Cards */}
       {recommendations.length > 0 && (
-        <div className="space-y-3.5">
-          <div className="flex items-center justify-between">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
             <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 rounded-full bg-botanical-500" />
-              <h4 className="text-xs font-bold uppercase tracking-wider text-forest-800">
+              <div className="w-2.5 h-2.5 rounded-full bg-botanical-500" />
+              <h4 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-forest-900">
                 Actionable Ecological Interventions ({recommendations.length})
               </h4>
             </div>
-            <span className="text-[11px] text-forest-500 font-mono">
-              Prioritized by multi-variable impact
+            <span className="text-xs text-forest-500 font-mono hidden sm:inline">
+              Prioritized by multi-variable causal impact
             </span>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-5">
             {recommendations.map((rec, idx) => (
               <RecommendationCard key={idx} rec={rec} index={idx} />
             ))}

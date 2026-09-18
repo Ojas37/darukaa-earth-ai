@@ -12,25 +12,25 @@ export const EvidenceSection: React.FC<EvidenceSectionProps> = ({ evidence }) =>
   }
 
   return (
-    <div className="mt-3 pt-3 border-t border-sage-200/80">
-      <div className="flex items-center space-x-1.5 mb-2">
-        <BookOpen className="w-3.5 h-3.5 text-botanical-600" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-forest-700">
-          Scientific Evidence & Literature Support ({evidence.length})
+    <div className="mt-4 pt-4 border-t border-sage-200/90 space-y-3">
+      <div className="flex items-center space-x-2">
+        <BookOpen className="w-4 h-4 text-botanical-600" />
+        <span className="text-[11px] font-bold uppercase tracking-wider text-forest-800">
+          Scientific Evidence & Literature Grounding ({evidence.length})
         </span>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {evidence.map((item, idx) => (
           <div
             key={idx}
-            className="p-2.5 bg-sage-50/70 hover:bg-sage-50 border border-sage-200/90 rounded-lg transition-colors text-xs space-y-1"
+            className="p-3.5 bg-sand-50/70 hover:bg-sand-50 border border-sage-200 rounded-xl transition-colors text-xs space-y-2"
           >
             {/* Source & Citation link */}
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center space-x-1.5 font-medium text-forest-800">
-                <Bookmark className="w-3 h-3 text-botanical-500 shrink-0 mt-0.5" />
-                <span className="leading-snug">{item.source}</span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-start space-x-2 font-semibold text-forest-900 flex-1 min-w-0">
+                <Bookmark className="w-3.5 h-3.5 text-botanical-600 shrink-0 mt-0.5" />
+                <span className="leading-snug break-words">{item.source}</span>
               </div>
 
               {item.url && (
@@ -38,7 +38,7 @@ export const EvidenceSection: React.FC<EvidenceSectionProps> = ({ evidence }) =>
                   href={item.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center space-x-1 text-botanical-600 hover:text-botanical-700 font-mono text-[11px] underline shrink-0 hover:opacity-80 transition-opacity"
+                  className="inline-flex items-center space-x-1 text-botanical-700 hover:text-botanical-800 font-mono text-[11px] bg-white px-2.5 py-1 rounded-md border border-sage-200 hover:border-botanical-300 transition-all shrink-0 shadow-2xs self-start sm:self-auto"
                   title={`Open source citation: ${item.url}`}
                 >
                   <span>DOI / Source</span>
@@ -49,9 +49,10 @@ export const EvidenceSection: React.FC<EvidenceSectionProps> = ({ evidence }) =>
 
             {/* Claim supported */}
             {item.claim_supported && (
-              <p className="text-forest-600 pl-4.5 leading-relaxed text-[11.5px]">
-                <span className="text-forest-500 font-medium">Finding:</span> {item.claim_supported}
-              </p>
+              <div className="pl-5 text-forest-700 leading-relaxed text-xs border-l-2 border-botanical-300 ml-1">
+                <span className="font-semibold text-forest-900">Empirical Finding: </span>
+                <span>{item.claim_supported}</span>
+              </div>
             )}
           </div>
         ))}
