@@ -1,190 +1,181 @@
 # Darukaa.Earth — AI Biodiversity Intelligence System
 
-> **A scientifically grounded, multi-metric environmental intelligence platform that models ecological interactions, retrieves peer-reviewed scientific evidence, and generates actionable, non-generic biodiversity restoration recommendations.**
+> **A scientifically grounded, multi-metric environmental intelligence platform that diagnoses ecological stress cascades, retrieves peer-reviewed scientific literature, and generates actionable, anti-hallucinatory biodiversity restoration recommendations.**
 
 ---
 
-## 🌿 Executive Summary
+## 🌐 Live Deployments
 
-Most generative AI applications treat ecological questions as generic conversational prompts, yielding vague, ungrounded recommendations (e.g., *"practice sustainable farming"* or *"plant trees"*). In reality, biological systems are complex, non-linear networks governed by interdependent physical and biological variables: soil organic carbon, moisture retention, pH dynamics, thermal and precipitation regimes, monoculture pressures, and anthropogenic habitat fragmentation.
-
-**Darukaa.Earth** functions as an **AI Environmental Scientist**. It combines:
-1. **Structured Environmental Profiling**: Capturing quantitative and qualitative variables with explicit provenance and uncertainty tracking.
-2. **Explicit Environmental Relationship Graphs**: Causal ecological dependency models that govern how soil, land-use, climate, and biodiversity metrics interact.
-3. **Dedicated Scientific Knowledge Base & Vector RAG**: Curated peer-reviewed literature, FAO frameworks, and IPCC reports retrieved via hybrid semantic + metadata-filtered vector search.
-4. **Multi-Metric Reasoning Engine**: Deterministic stressor identification and candidate intervention evaluation across simultaneous variables.
-5. **Scientific Claim Validation & Confidence Scoring**: Anti-hallucination verification ensuring every recommendation, quantitative metric, and timeline is rigorously backed by retrieved citations or conservatively framed.
+- **Frontend (Vercel Global CDN):** [https://frontend-five-phi-74.vercel.app](https://frontend-five-phi-74.vercel.app)
+- **Backend API (FastAPI + ChromaDB):** [https://darukaa-earth-ai.onrender.com](https://darukaa-earth-ai.onrender.com)
+- **GitHub Repository:** [https://github.com/Ojas37/darukaa-earth-ai](https://github.com/Ojas37/darukaa-earth-ai)
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ 1. Architecture Overview
+
+Darukaa employs an **evidence-locked, causal-reasoning architecture** that decouples biological deduction from LLM text generation to prevent hallucinations.
 
 ```
-                                  ┌────────────────────────┐
-                                  │      User / Client     │
-                                  └───────────┬────────────┘
-                                              │
-                                  ┌───────────▼────────────┐
-                                  │ React Scientific UI    │
-                                  │ (Dashboard & Chat)     │
-                                  └───────────┬────────────┘
-                                              │ REST API / WebSocket
-                                  ┌───────────▼────────────┐
-                                  │   FastAPI Gateway      │
-                                  └───────────┬────────────┘
-                                              │
-                       ┌──────────────────────┴──────────────────────┐
-                       │                                             │
-            ┌──────────▼───────────┐                      ┌──────────▼───────────┐
-            │ Query Understanding  │                      │ Conversation Memory  │
-            │ & Variable Extractor │                      │ & Context Manager    │
-            └──────────┬───────────┘                      └──────────┬───────────┘
-                       │                                             │
-                       └──────────────────────┬──────────────────────┘
-                                              │
-                                  ┌───────────▼────────────┐
-                                  │ Environmental Profile  │
-                                  │ (Structured Pydantic)  │
-                                  └───────────┬────────────┘
-                                              │
-                      ┌───────────────────────┼───────────────────────┐
-                      │                       │                       │
-           ┌──────────▼───────────┐┌──────────▼───────────┐┌──────────▼───────────┐
-           │ Missing Information  ││ Environmental Graph  ││ Scientific Vector    │
-           │ & Clarification Eng. ││ Causal Relationships ││ RAG Knowledge Base   │
-           └──────────────────────┘└──────────┬───────────┘└──────────┬───────────┘
-                                              │                       │
-                                  ┌───────────▼───────────────────────▼┐
-                                  │    Multi-Metric Reasoning Engine   │
-                                  │  - Anomaly & Stress Detection      │
-                                  │  - Cross-Variable Interaction      │
-                                  │  - Candidate Intervention Matrix   │
-                                  │  - Constraint Checking             │
-                                  └───────────────────┬────────────────┘
-                                                      │
-                                  ┌───────────────────▼────────────────┐
-                                  │       Recommendation Engine        │
-                                  │   Actionable Interventions + Why   │
-                                  └───────────────────┬────────────────┘
-                                                      │
-                                  ┌───────────────────▼────────────────┐
-                                  │  Scientific Claim Validation &     │
-                                  │  Confidence Engine (Anti-Halluc.)  │
-                                  └───────────────────┬────────────────┘
-                                                      │
-                                  ┌───────────────────▼────────────────┐
-                                  │   Structured Response Generator    │
-                                  └───────────────────┬────────────────┘
-                                                      │
-                                  ┌───────────────────▼────────────────┐
-                                  │  Client Scientific Visualizer      │
-                                  └────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Client Interface (React / Vite)                    │
+│    • Real-Time SSE Streamer   • Causal Pathway Graphs   • Metric Diffs  │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │ REST / Server-Sent Events (SSE)
+┌────────────────────────────────────▼────────────────────────────────────┐
+│                         FastAPI API Gateway                             │
+└───────────────┬─────────────────────────────────────────┬───────────────┘
+                │                                         │
+┌───────────────▼────────────────────────┐  ┌─────────────▼───────────────┐
+│     NLP Variable Extractor & Parser    │  │ Multi-Turn Session Memory   │
+│   • Rule & regex clause extractors     │  │ • Profile state transitions │
+│   • Active clarification engine        │  │ • Dialogue context & history│
+└───────────────┬────────────────────────┘  └─────────────────────────────┘
+                │
+┌───────────────▼─────────────────────────────────────────────────────────┐
+│           Structured Environmental Profile (21 Pydantic Metrics)        │
+└───────────────┬─────────────────────────────────────────┬───────────────┘
+                │                                         │
+┌───────────────▼────────────────────────┐  ┌─────────────▼───────────────┐
+│     Ecological Relationship Graph      │  │    ChromaDB Vector Store    │
+│  • 18 Causal Stressor Edges (DAG)      │  │  • 19 Peer-Reviewed Studies │
+│  • Fixed-point multi-hop propagation   │  │  • Cosine Semantic Search   │
+│  • Maximal pathway subsumption         │  │  • Per-Edge Evidence Floor  │
+└───────────────┬────────────────────────┘  └─────────────┬───────────────┘
+                │                                         │
+┌───────────────▼─────────────────────────────────────────▼───────────────┐
+│                    Multi-Metric Recommendation Engine                   │
+│   • Biophysical Guardrails (e.g. zero irrigation in semi-arid zones)    │
+│   • LLM Synthesis (Claude 3.5 Sonnet / Groq LLaMA-3.3 70B)              │
+│   • Automated Claim Validator (verifies all metrics against citations)  │
+│   • Deterministic Confidence Scorer (0.0 – 1.0)                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔬 Core Architectural Pillars
+## 🗄️ 2. Database & Data Schema
 
-### 1. No LLM-Only Hallucinations
-The Large Language Model is isolated to language understanding, synthesis, and explanation. Factual reasoning, stress detection, causal propagation, and metric mapping are driven by the structured environmental profile, the ecological relationship graph, and the verified scientific knowledge base.
+### A. Environmental Profile (`Pydantic v2`)
+Tracks **21 standardized ecological variables** across 5 physical and biological domains:
 
-### 2. Multi-Metric Co-dependency & Causal Stress Pathways
-An intervention is never evaluated in isolation or for a single metric. 
-- **Causal Graph Modeling**: An explicit 12-edge ecological graph models multi-hop cascades (e.g. $\text{SOC} \to \text{Infiltration} \to \text{Moisture Deficit} \to \text{Pollinator Food Scarcity} \to \text{Pollinator Decline}$).
-- **Maximal Pathway Subsumption**: When multiple sub-chains share the same causal lineage and terminal outcome, the engine automatically selects the maximal root-to-terminal chain. This ensures recommendations tackle root causes (e.g., soil organic carbon building) rather than cosmetic symptoms (e.g., watering downstream). Parallel distinct pathways targeting the same outcome (e.g., pesticide toxicity vs. habitat homogenization $\to$ species richness) are preserved and addressed independently.
-- **Ecological Constraint Enforcement**: Strategies are cross-checked against biophysical guardrails (e.g. zero irrigation in semi-arid zones, no-till on fragile low-SOC soils).
-- **Study-Weighted Confidence Scoring**: Confidence combines profile data completeness, edge directness, and evidence study design (meta-analyses and institutional IPCC/FAO assessments are weighted above single-site trials).
-
-### 3. Transparent Evidence & Uncertainty
-Every recommendation exposes:
-- **Mechanisms**: The exact physical/biological chain of causality.
-- **Affected Metrics**: Direct and indirect ecological metrics impacted (e.g., Soil Organic Carbon, Microbial Biomass, Pollinator Richness).
-- **Time Horizons**: Expected short-term (0-1 yr), medium-term (1-5 yrs), and long-term (5-15 yrs) progressions.
-- **Citations**: Specific DOI/source-backed scientific literature.
-- **Confidence Rating**: Algorithmic assessment (High / Medium / Low) calculated from input completeness, evidence relevance score, and source consensus.
-
----
-
-## 📁 Repository Structure
-
-```
-darukaa-earth/
-├── frontend/                  # React + TypeScript + Vite + Tailwind CSS dashboard
-│   ├── src/
-│   │   ├── components/        # Profile cards, chat interface, graph visualizer, recommendations
-│   │   ├── services/          # API client & streaming hooks
-│   │   └── types/             # TypeScript interfaces matching backend schemas
-├── backend/                   # Python FastAPI service
-│   ├── app/
-│   │   ├── api/               # API endpoints (v1 routes)
-│   │   ├── core/              # Config, logging, error handling, security
-│   │   ├── models/            # Database and vector storage models
-│   │   ├── schemas/           # Pydantic schemas (Environmental Profile, Reasoning, Output)
-│   │   ├── services/          # LLM Provider abstraction, extraction, ingestion services
-│   │   ├── rag/               # Chunking, embeddings, vector indexing, retrieval pipeline
-│   │   ├── reasoning/         # Multi-metric engine, stress detection, relationship graph
-│   │   ├── recommendations/   # Candidate generation, metric projection, prioritization
-│   │   ├── validation/        # Evidence verification & confidence engine
-│   │   ├── memory/            # Multi-turn conversation state & context management
-│   │   ├── data/              # Structured datasets & relationship graph definitions
-│   │   └── main.py            # FastAPI application entrypoint
-│   └── tests/                 # Unit, integration, RAG, and reasoning test suites
-├── data/
-│   ├── raw/                   # Raw scientific documents and open datasets
-│   ├── processed/             # Cleaned, structured scientific corpora & JSON benchmarks
-│   └── knowledge/             # Pre-built vector indices and relationship graph artifacts
-├── docs/                      # Comprehensive technical documentation (Phase 0)
-│   ├── architecture.md        # System architecture and data flow
-│   ├── data-model.md          # Environmental data model & variable taxonomy
-│   ├── rag-design.md          # RAG ingestion, indexing, retrieval, and validation
-│   ├── reasoning-engine.md    # Multi-metric reasoning & relationship graph
-│   ├── api-design.md          # REST API contracts & JSON schemas
-│   └── development-phases.md  # 25-phase roadmap and verification criteria
-├── scripts/                   # Ingestion scripts, benchmarking, and database seeds
-├── docker/                    # Dockerfiles and orchestration configs
-├── .env.example               # Environment variables template
-├── docker-compose.yml         # Containerized local execution setup
-└── README.md                  # Project overview & quickstart
+```python
+class EnvironmentalProfile(BaseModel):
+    location: LocationProfile        # Biome, Region, Coordinates, Elevation
+    soil: SoilProfile                # pH, SOC (%), Moisture (%), Bulk Density, Texture
+    land: LandProfile                # Land Use, Land Cover, Cropping Pattern, Tillage, Canopy (%)
+    biodiversity: BiodiversityProfile# Species Richness, Pollinators, Soil Biology, Issues List
+    climate: ClimateProfile          # Rainfall (mm/yr), Pattern, Mean Temp (°C), Aridity Index
+    human_impact: HumanImpactProfile # Pollution Level & Types, Deforestation, Fragmentation
 ```
 
----
+- **Provenance & Uncertainty**: Every field tracks its `ValueStatus` (`provided`, `estimated`, `unknown`, `missing`), numeric confidence score ($0.0 - 1.0$), and raw text citation.
+- **Completeness Formula**: $\text{Completeness} = \frac{\text{Known Metrics}}{21 \text{ Total Metrics}}$.
 
-## 📊 Environmental Variables Supported
-
-| Category | Primary Metrics | Units / Format |
-|---|---|---|
-| **Soil** | Soil Organic Carbon (SOC), pH, Moisture Content, Bulk Density | %, pH scale (0-14), %, g/cm³ |
-| **Land** | Land Use, Land Cover, Cropping Pattern, Canopy Cover | Categorical / % |
-| **Biodiversity** | Species Richness, Habitat Diversity Index, Indicator Taxa | Count, Shannon Index (H'), List |
-| **Climate** | Mean Annual Precipitation, Mean Temperature, Aridity Index | mm/year, °C, UNEP AI index |
-| **Human Impact** | Chemical Pollution Level, Deforestation Rate, Habitat Fragmentation | Index (Low/Med/High), %/year, Proximity (km) |
-| **Geographic** | Latitude, Longitude, Elevation, Agro-Ecological Zone (AEZ) | Dec. Degrees, Meters ASL, FAO AEZ classification |
+### B. Vector Knowledge Base (`ChromaDB`)
+- **Storage**: Persistent embedded ChromaDB instance (`data/knowledge/chroma/`).
+- **Corpus**: 19 curated, traceable studies from **IPCC, FAO, Nature Communications, Journal of Environmental Quality, and Ecological Engineering**.
+- **Indexing**: Cosine space with mandatory similarity floors ($\ge 0.50$) to reject ungrounded or forced citations.
 
 ---
 
-## 🛠️ Technology Stack
+## 💻 3. Local Development Setup
 
-- **Backend**: Python 3.11+, FastAPI, Pydantic v2, NumPy, Pandas
-- **AI & RAG**: Configurable `LLMProvider` (OpenAI / Anthropic / Gemini / Local Ollama), Vector Database (Chroma / FAISS / pgvector), Semantic Chunking, SentenceTransformers / OpenAI Embeddings
-- **Knowledge Base**: Curated corpus from FAO, IPCC, Nature Ecology & Evolution, Soil Biology & Biochemistry, Agroforestry Systems
-- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, Lucide Icons, Recharts
-- **Storage**: SQLite (Local Dev) / PostgreSQL (Production), Chroma / FAISS for vector storage
-- **Containerization**: Docker & Docker Compose
-- **Testing**: Pytest, Pytest-Asyncio, HTTPX
+### Prerequisites
+- **Python 3.10+**
+- **Node.js 18+** & `npm`
+- **Groq API Key** *(free tier)* or **Anthropic API Key**
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/Ojas37/darukaa-earth-ai.git
+cd darukaa-earth-ai
+```
+
+### 2. Backend Setup
+```bash
+cd backend
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+Create `backend/.env`:
+```env
+GROQ_API_KEY=your_groq_api_key_here
+# Optional:
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+```
+
+Start the FastAPI development server:
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+*API Docs available at: `http://localhost:8000/docs`*
+
+### 3. Frontend Setup
+```bash
+cd ../frontend
+npm install
+npm run dev
+```
+*Frontend running at: `http://localhost:5173`*
 
 ---
 
-## 🚦 Getting Started & Documentation Roadmap
+## 🚀 4. CI/CD & Cloud Deployment
 
-For in-depth specifications, review the dedicated documentation in `/docs`:
-- [Architecture & System Flow](docs/architecture.md)
-- [Environmental Data Model](docs/data-model.md)
-- [Scientific RAG & Knowledge Retrieval](docs/rag-design.md)
-- [Multi-Metric Reasoning Engine](docs/reasoning-engine.md)
-- [API Design & Contracts](docs/api-design.md)
-- [Master Development Phases (0 - 25)](docs/development-phases.md)
+The repository is configured for automated, zero-downtime continuous deployment:
+
+### A. Frontend Deployment (Vercel)
+- **Framework Preset**: `Vite`
+- **Root Directory**: `frontend`
+- **Build Command**: `npm run build` (`tsc -b && vite build`)
+- **Output Directory**: `dist`
+- **Environment Variable**: `VITE_API_BASE_URL=https://darukaa-earth-ai.onrender.com`
+- **Deployment Trigger**: Auto-deployed on every push to `main` via Vercel GitHub integration.
+
+### B. Backend Deployment (Render Blueprint)
+Configured via [`render.yaml`](render.yaml) Infrastructure-as-Code:
+```yaml
+services:
+  - type: web
+    name: darukaa-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+```
 
 ---
 
-## ⚖️ License & Scientific Grounding
-Built for environmental intelligence research and hackathon demonstration. All recommendations cite scientific literature and adhere to strict evidence-grounding constraints.
+## 🧪 5. Verification & Testing
+
+Run the full automated test suite:
+```bash
+# Backend unit, reasoning, and RAG tests:
+cd backend
+pytest tests/ -v
+
+# Frontend TypeScript and bundle build check:
+cd ../frontend
+npm run build
+```
+
+---
+
+## ⚖️ License
+Built for ecological intelligence research and hackathon demonstration. All recommendations cite peer-reviewed literature and enforce strict anti-hallucinatory guardrails.
