@@ -1,9 +1,19 @@
 import { useState } from 'react';
 import type { ChatMessage, ChatResponse } from './types/api';
-import { sendChatMessage } from './services/api';
+import { streamChatMessage } from './services/api';
 import { Header } from './components/Header';
 import { ChatWindow } from './components/ChatWindow';
+import type { StreamingStatus } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
+
+const INITIAL_STREAMING_STATE: StreamingStatus = {
+  isStreaming: false,
+  stage: 'extracting',
+  stageMessage: 'Extracting environmental parameters...',
+  streamingText: '',
+  streamingProfile: null,
+  streamingPathways: null,
+};
 
 export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -13,10 +23,11 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSubmitted, setLastSubmitted] = useState<string>('');
+  const [streamingStatus, setStreamingStatus] = useState<StreamingStatus>(INITIAL_STREAMING_STATE);
 
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend !== undefined ? textToSend : inputPrompt).trim();
-    if (!query || isLoading) return;
+    if (!query || isLoading || streamingStatus.isStreaming) return;
 
     setError(null);
     setLastSubmitted(query);
@@ -34,36 +45,81 @@ export function App() {
     setMessages((prev) => [...prev, userMessage]);
     setInputPrompt('');
     setIsLoading(true);
+    setStreamingStatus({
+      isStreaming: true,
+      stage: 'extracting',
+      stageMessage: 'Extracting environmental parameters...',
+      streamingText: '',
+      streamingProfile: null,
+      streamingPathways: null,
+    });
 
     try {
-      const responseData: ChatResponse = await sendChatMessage(query, conversationId);
+      await streamChatMessage(query, conversationId, {
+        onStatus: (stage, message) => {
+          setStreamingStatus((prev) => ({
+            ...prev,
+            stage,
+            stageMessage: message,
+          }));
+        },
+        onProfile: (profile) => {
+          setStreamingStatus((prev) => ({
+            ...prev,
+            streamingProfile: profile,
+          }));
+        },
+        onPathways: (pathways) => {
+          setStreamingStatus((prev) => ({
+            ...prev,
+            streamingPathways: pathways,
+          }));
+        },
+        onDelta: (deltaText) => {
+          setStreamingStatus((prev) => ({
+            ...prev,
+            streamingText: prev.streamingText + deltaText,
+          }));
+        },
+        onDone: (responseData: ChatResponse) => {
+          if (responseData.conversation_id) {
+            setConversationId(responseData.conversation_id);
+          }
+          if (responseData.turn_index !== undefined) {
+            setTurnCount(responseData.turn_index);
+          } else {
+            setTurnCount((prev) => prev + 1);
+          }
 
-      // Save conversation ID from backend
-      if (responseData.conversation_id) {
-        setConversationId(responseData.conversation_id);
-      }
-      if (responseData.turn_index !== undefined) {
-        setTurnCount(responseData.turn_index);
-      } else {
-        setTurnCount((prev) => prev + 1);
-      }
+          const assistantMessage: ChatMessage = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: responseData.message || 'Ecological diagnostic analysis complete.',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            response: responseData,
+          };
 
-      const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: responseData.message || 'Ecological diagnostic analysis complete.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        response: responseData,
-      };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+          setMessages((prev) => [...prev, assistantMessage]);
+          setStreamingStatus(INITIAL_STREAMING_STATE);
+          setIsLoading(false);
+        },
+        onError: (err) => {
+          console.error('Streaming error:', err);
+          setError(
+            err.message ||
+              'Failed to connect to the Darukaa reasoning service. Ensure the FastAPI backend is running at http://localhost:8000.'
+          );
+          setStreamingStatus(INITIAL_STREAMING_STATE);
+          setIsLoading(false);
+        },
+      });
     } catch (err: any) {
       console.error('Chat error:', err);
       setError(
         err.message ||
           'Failed to connect to the Darukaa reasoning service. Ensure the FastAPI backend is running at http://localhost:8000.'
       );
-    } finally {
+      setStreamingStatus(INITIAL_STREAMING_STATE);
       setIsLoading(false);
     }
   };
@@ -75,6 +131,7 @@ export function App() {
     setInputPrompt('');
     setError(null);
     setLastSubmitted('');
+    setStreamingStatus(INITIAL_STREAMING_STATE);
   };
 
   const handleSelectExample = (promptText: string) => {
@@ -105,6 +162,7 @@ export function App() {
         <ChatWindow
           messages={messages}
           isLoading={isLoading}
+          streamingStatus={streamingStatus}
           error={error}
           onSelectPrompt={handleSelectExample}
           onSelectClarificationHint={handleSelectClarificationHint}
@@ -116,7 +174,7 @@ export function App() {
           value={inputPrompt}
           onChange={setInputPrompt}
           onSubmit={() => handleSendMessage()}
-          isLoading={isLoading}
+          isLoading={isLoading || streamingStatus.isStreaming}
           onClear={() => setInputPrompt('')}
         />
       </main>

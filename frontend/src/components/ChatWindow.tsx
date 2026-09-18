@@ -3,12 +3,23 @@ import type { ChatMessage } from '../types/api';
 import { EmptyState } from './EmptyState';
 import { UserMessage } from './UserMessage';
 import { AssistantResponse } from './AssistantResponse';
+import { StreamingAssistantMessage } from './StreamingAssistantMessage';
 import { LoadingState } from './LoadingState';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
+
+export interface StreamingStatus {
+  isStreaming: boolean;
+  stage: string;
+  stageMessage: string;
+  streamingText: string;
+  streamingProfile?: Record<string, any> | null;
+  streamingPathways?: any[] | null;
+}
 
 interface ChatWindowProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  streamingStatus?: StreamingStatus;
   error: string | null;
   onSelectPrompt: (promptText: string) => void;
   onSelectClarificationHint?: (hint: string) => void;
@@ -18,6 +29,7 @@ interface ChatWindowProps {
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   isLoading,
+  streamingStatus,
   error,
   onSelectPrompt,
   onSelectClarificationHint,
@@ -27,12 +39,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading, error]);
+  }, [messages, isLoading, streamingStatus?.streamingText, error]);
+
+  const isCurrentlyStreaming = streamingStatus?.isStreaming;
 
   return (
     <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 overflow-y-auto">
       {/* Empty Landing View */}
-      {messages.length === 0 && !isLoading && !error && (
+      {messages.length === 0 && !isLoading && !isCurrentlyStreaming && !error && (
         <EmptyState onSelectPrompt={onSelectPrompt} />
       )}
 
@@ -54,10 +68,21 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             )}
           </div>
         ))}
+
+        {/* Live SSE Streaming Assistant Message */}
+        {isCurrentlyStreaming && streamingStatus && (
+          <StreamingAssistantMessage
+            stage={streamingStatus.stage}
+            stageMessage={streamingStatus.stageMessage}
+            streamingText={streamingStatus.streamingText}
+            streamingProfile={streamingStatus.streamingProfile}
+            streamingPathways={streamingStatus.streamingPathways}
+          />
+        )}
       </div>
 
-      {/* Loading Indicator */}
-      {isLoading && <LoadingState />}
+      {/* Fallback Loading Indicator if loading without active SSE delta */}
+      {isLoading && !isCurrentlyStreaming && <LoadingState />}
 
       {/* Error Banner */}
       {error && (

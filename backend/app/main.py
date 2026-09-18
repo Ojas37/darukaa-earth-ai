@@ -1,7 +1,10 @@
 import logging
+import json
+import asyncio
 from typing import Optional
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from app.config import settings
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.schemas.profile import EnvironmentalProfile
@@ -131,6 +134,154 @@ async def chat_turn(request: ChatRequest):
         formatted_text=report.formatted_text if report else None,
         narrative_summary=report.narrative_summary if report else None,
         overall_confidence=report.overall_confidence if report else None,
+    )
+
+@app.post("/api/v1/chat/stream", tags=["Conversational AI"])
+async def chat_stream_turn(request: ChatRequest):
+    """
+    Real-time Server-Sent Events (SSE) streaming endpoint.
+    Emits progressive reasoning stages, real-time token deltas, and the finalized structured report.
+    """
+    async def event_generator():
+        try:
+            # 1. Progress Status: Extraction
+            yield f"event: status\ndata: {json.dumps({'stage': 'extracting', 'message': 'Extracting environmental parameters...'})}\n\n"
+            await asyncio.sleep(0.04)
+
+            session = session_manager.get_or_create_session(request.conversation_id)
+            session.add_message(role="user", content=request.message)
+
+            # 2. Extract parameters and merge
+            updated_profile = extractor.extract(text=request.message, existing_profile=session.profile)
+            session.profile = updated_profile
+
+            yield f"event: profile\ndata: {json.dumps(session.profile.to_summary_dict())}\n\n"
+            await asyncio.sleep(0.04)
+
+            # 3. Evaluate missing critical variables
+            needs_clarification, missing_items, clarification_prompt = clarification_engine.evaluate(session.profile)
+
+            if needs_clarification:
+                yield f"event: status\ndata: {json.dumps({'stage': 'clarification', 'message': 'Targeted clarification questions required...'})}\n\n"
+                
+                # Stream clarification prompt word by word
+                words = (clarification_prompt or "").split(" ")
+                for w in words:
+                    yield f"event: delta\ndata: {json.dumps({'text': w + ' '})}\n\n"
+                    await asyncio.sleep(0.02)
+
+                chat_resp = ChatResponse(
+                    conversation_id=session.conversation_id,
+                    turn_index=len(session.messages) // 2,
+                    message=clarification_prompt or "",
+                    needs_clarification=True,
+                    missing_information=missing_items,
+                    profile_summary=session.profile.to_summary_dict(),
+                    extracted_variables=session.profile.model_dump(exclude_none=True),
+                    active_stress_pathways=[],
+                    retrieved_evidence=[],
+                    recommendations=[],
+                    clarification_prompt=clarification_prompt,
+                    report=None,
+                    formatted_text=None,
+                    narrative_summary=None,
+                    overall_confidence=None,
+                )
+                session.add_message(role="assistant", content=clarification_prompt or "")
+                session_manager.save_session(session)
+                yield f"event: done\ndata: {chat_resp.model_dump_json()}\n\n"
+                return
+
+            # 4. Discover Causal Pathways in DAG
+            yield f"event: status\ndata: {json.dumps({'stage': 'pathways', 'message': 'Diagnosing causal stress pathways in relationship DAG...'})}\n\n"
+            await asyncio.sleep(0.04)
+
+            active_pathways = relationship_graph.find_stress_pathways(session.profile, min_length=2)
+            pathway_payload = [
+                {
+                    "pathway_id": p.pathway_id,
+                    "summary": p.summary,
+                    "nodes": p.nodes,
+                    "chain_length": p.chain_length,
+                    "confidence": p.confidence.value if hasattr(p.confidence, "value") else str(p.confidence),
+                }
+                for p in active_pathways
+            ]
+            yield f"event: pathways\ndata: {json.dumps(pathway_payload)}\n\n"
+            await asyncio.sleep(0.04)
+
+            # 5. Retrieve Literature Evidence
+            yield f"event: status\ndata: {json.dumps({'stage': 'evidence', 'message': 'Querying peer-reviewed literature corpus...'})}\n\n"
+            await asyncio.sleep(0.04)
+
+            active_edge_ids = list(set([edge.id for p in active_pathways for edge in p.edges]))
+            retrieved_evidence = evidence_retriever.retrieve(
+                query=f"biodiversity restoration soil organic carbon management in {session.profile.location.biome or 'cropland'}",
+                biome=session.profile.location.biome,
+                climate_zone=str(session.profile.climate.rainfall_pattern.value) if session.profile.climate.rainfall_pattern.is_known else None,
+                edge_ids=active_edge_ids if active_edge_ids else None,
+                top_k=5
+            )
+
+            # 6. Synthesize Recommendations
+            yield f"event: status\ndata: {json.dumps({'stage': 'synthesizing', 'message': 'Synthesizing multi-variable recommendations...'})}\n\n"
+            
+            recommendations = recommendation_generator.generate(
+                profile=session.profile,
+                pathways=active_pathways,
+            )
+
+            report = build_structured_report(
+                conversation_id=session.conversation_id,
+                profile=session.profile,
+                pathways=active_pathways,
+                recommendations=recommendations,
+            )
+            session.latest_report_json = report.model_dump_json()
+            response_text = report.formatted_text
+
+            # Stream narrative summary word by word
+            stream_text = report.narrative_summary or response_text or ""
+            words = stream_text.split(" ")
+            for w in words:
+                yield f"event: delta\ndata: {json.dumps({'text': w + ' '})}\n\n"
+                await asyncio.sleep(0.02)
+
+            session.add_message(role="assistant", content=response_text)
+            session_manager.save_session(session)
+
+            chat_resp = ChatResponse(
+                conversation_id=session.conversation_id,
+                turn_index=len(session.messages) // 2,
+                message=response_text,
+                needs_clarification=False,
+                missing_information=[],
+                profile_summary=session.profile.to_summary_dict(),
+                extracted_variables=session.profile.model_dump(exclude_none=True),
+                active_stress_pathways=active_pathways,
+                retrieved_evidence=retrieved_evidence,
+                recommendations=recommendations,
+                clarification_prompt=None,
+                report=report,
+                formatted_text=report.formatted_text,
+                narrative_summary=report.narrative_summary,
+                overall_confidence=report.overall_confidence,
+            )
+
+            yield f"event: done\ndata: {chat_resp.model_dump_json()}\n\n"
+
+        except Exception as e:
+            logger.exception(f"Error in SSE stream: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )
 
 @app.get("/api/v1/report/{conversation_id}", response_model=StructuredReportResponse, tags=["Reports"])
