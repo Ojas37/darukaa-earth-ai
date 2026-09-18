@@ -6,7 +6,7 @@
 
 ## 🌐 Live Deployments
 
-- **Frontend (Vercel Global CDN):** [https://frontend-five-phi-74.vercel.app](https://frontend-five-phi-74.vercel.app)
+- **Frontend (Vercel Global CDN):** [https://daruka-ojas.vercel.app/](https://daruka-ojas.vercel.app/)
 - **Backend API (FastAPI + ChromaDB):** [https://darukaa-earth-ai.onrender.com](https://darukaa-earth-ai.onrender.com)
 - **GitHub Repository:** [https://github.com/Ojas37/darukaa-earth-ai](https://github.com/Ojas37/darukaa-earth-ai)
 
