@@ -14,7 +14,7 @@ jobs:
     steps:
       - name: Ping /health
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://darukaa-backend.onrender.com/health)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://darukaa-backend-dvch.onrender.com/health)
           echo "Response status: $STATUS"
           if [ "$STATUS" -ne 200 ]; then
             echo "WARNING: Backend returned non-200 status: $STATUS"
