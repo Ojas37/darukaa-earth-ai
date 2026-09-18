@@ -1,9 +1,16 @@
 import os
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from dotenv import load_dotenv
 
-load_dotenv()
+# Search for .env in current directory, backend directory, and project root
+_backend_dir = Path(__file__).resolve().parent.parent
+_root_dir = _backend_dir.parent
+
+for _p in [Path.cwd() / ".env", _backend_dir / ".env", _root_dir / ".env"]:
+    if _p.is_file():
+        load_dotenv(_p, override=False)
 
 class Settings(BaseSettings):
     app_name: str = "Darukaa.Earth AI Biodiversity Intelligence"
@@ -17,7 +24,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_backend_dir / ".env"),
         extra="ignore"
     )
 
