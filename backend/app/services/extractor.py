@@ -69,8 +69,8 @@ class EnvironmentalExtractor:
         biome_patterns = {
             "semi_arid": [r"semi-arid", r"semi arid", r"dryland", r"dry plateau"],
             "arid": [r"\barid\b", r"desert"],
-            "tropical_dry": [r"tropical dry", r"dry deciduous"],
-            "tropical_humid": [r"tropical rainforest", r"humid tropics", r"wet tropics"],
+            "tropical_dry": [r"tropical dry", r"dry deciduous", r"tropical monsoon", r"\bmonsoon\b"],
+            "tropical_humid": [r"tropical rainforest", r"humid tropics", r"wet tropics", r"sub-humid", r"subhumid"],
             "temperate": [r"temperate", r"prairie", r"pampas", r"midwest"],
             "mediterranean": [r"mediterranean", r"chaparral"]
         }
@@ -81,27 +81,33 @@ class EnvironmentalExtractor:
                 break
 
         # Check for specific geographic region mentions
-        region_match = re.search(r"(?:in|from|region of)\s+([A-Za-z0-9\s\-]+?)(?:,|\.|\band\b|with|$)", text, re.IGNORECASE)
+        region_match = re.search(r"(?:located in|in the region of|in|from|region of)\s+([A-Za-z0-9\s\-]+?)(?:,|\.|\band\b|with|$)", text, re.IGNORECASE)
         if region_match and not profile.location.region_name:
             reg = region_match.group(1).strip()
-            if len(reg) < 30 and not any(k in reg.lower() for k in ["low", "high", "percent", "crop"]):
+            excluded_words = [
+                "low", "high", "percent", "crop", "erosion", "suffer", "degrad",
+                "nutrient", "runoff", "drought", "matter", "carbon", "loss",
+                "monsoon", "rain", "soil", "extreme", "depletion", "heavy",
+                "clay", "sand", "loam", "poor", "acid", "saline"
+            ]
+            if len(reg) < 30 and not any(k in reg.lower() for k in excluded_words):
                 profile.location.region_name = reg
 
         # -----------------------------
-        # 2. Soil Organic Carbon (SOC)
+        # 2. Soil Organic Carbon (SOC) / Soil Organic Matter (SOM)
         # -----------------------------
         # Clause-scoped unknown check
-        if re.search(r"(?:don'?t know|no idea|unknown|not sure|haven'?t tested)[^.,;\n]*(?:carbon|soc|organic matter)", text_lower):
+        if re.search(r"(?:don'?t know|no idea|unknown|not sure|haven'?t tested)[^.,;\n]*(?:carbon|soc|organic matter|som)", text_lower):
             profile.soil.organic_carbon_percent.status = ValueStatus.UNKNOWN
         else:
-            # SOC percentage: e.g. "soil carbon is 0.3%", "soil carbon is around 0.3%", "SOC 0.35%", "organic carbon: 1.2%"
-            soc_match = re.search(r"(?:soil\s+organic\s+carbon|organic\s+carbon|soil\s+carbon|carbon|soc)[\s:=a-z]*(?:is|of|=|around|approx(?:imately)?|at|about)?\s*([0-9]+(?:\.[0-9]+)?)\s*%", text_lower)
+            # SOC/SOM percentage: e.g. "soil carbon is 0.3%", "organic matter at 0.4%", "SOC 0.35%", "SOM: 1.2%"
+            soc_match = re.search(r"(?:soil\s+organic\s+carbon|organic\s+carbon|soil\s+carbon|soil\s+organic\s+matter|organic\s+matter|carbon|soc|som)[\s:=a-z]*(?:is|of|=|around|approx(?:imately)?|at|about)?\s*([0-9]+(?:\.[0-9]+)?)\s*%", text_lower)
             if not soc_match:
-                # E.g. "0.3% soil carbon" or "0.3% SOC" or "0.3% organic carbon"
-                soc_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:soil\s+organic\s+carbon|soil\s+carbon|organic\s+carbon|carbon|soc)", text_lower)
+                # E.g. "0.3% soil carbon" or "0.4% organic matter" or "0.3% SOC"
+                soc_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:soil\s+organic\s+carbon|soil\s+carbon|organic\s+carbon|soil\s+organic\s+matter|organic\s+matter|carbon|soc|som)", text_lower)
             if not soc_match:
-                # Direct percentage after carbon mention
-                soc_match = re.search(r"(?:soil\s+carbon|carbon|soc)[^\d%]{1,20}([0-9]+(?:\.[0-9]+)?)\s*%", text_lower)
+                # Direct percentage after carbon/matter mention
+                soc_match = re.search(r"(?:soil\s+carbon|organic\s+matter|carbon|soc|som)[^\d%]{1,20}([0-9]+(?:\.[0-9]+)?)\s*%", text_lower)
 
             if soc_match:
                 val = float(soc_match.group(1))
@@ -113,13 +119,13 @@ class EnvironmentalExtractor:
                         confidence=1.0,
                         raw_input=soc_match.group(0)
                     )
-            elif any(k in text_lower for k in ["low carbon", "poor soil carbon", "depleted carbon", "low soc"]):
+            elif any(k in text_lower for k in ["low carbon", "poor soil carbon", "depleted carbon", "low soc", "low organic matter", "depleted organic matter"]):
                 profile.soil.organic_carbon_percent = EnvironmentalMetric[float](
                     value=0.5,
                     unit="%",
                     status=ValueStatus.ESTIMATED,
                     confidence=0.7,
-                    source_notes="Estimated from qualitative 'low carbon' description"
+                    source_notes="Estimated from qualitative 'low carbon/organic matter' description"
                 )
 
         # -----------------------------
@@ -197,11 +203,17 @@ class EnvironmentalExtractor:
                 confidence=1.0
             )
 
-        # Land use
+        # Land use & Land cover
+        if "riparian" in text_lower or "riverbank" in text_lower or "stream bank" in text_lower or "buffer zone" in text_lower:
+            profile.land.land_cover = EnvironmentalMetric[str](value="riparian_buffer", status=ValueStatus.PROVIDED)
+            if not profile.land.land_use.is_known:
+                profile.land.land_use = EnvironmentalMetric[str](value="riparian_corridor", status=ValueStatus.PROVIDED)
+
         if "pasture" in text_lower or "grazing" in text_lower:
             profile.land.land_use = EnvironmentalMetric[str](value="pasture", status=ValueStatus.PROVIDED)
         elif any(k in text_lower for k in ["farm", "cropland", "crop", "hectares", "acres", "field"]):
-            profile.land.land_use = EnvironmentalMetric[str](value="cropland", status=ValueStatus.PROVIDED)
+            if not profile.land.land_use.is_known:
+                profile.land.land_use = EnvironmentalMetric[str](value="cropland", status=ValueStatus.PROVIDED)
 
         # Primary Crops
         common_crops = ["wheat", "corn", "maize", "soybean", "soy", "cotton", "rice", "barley", "canola", "sunflower", "coffee", "millet", "sorghum"]
@@ -261,24 +273,121 @@ class EnvironmentalExtractor:
                 )
                 profile.biodiversity.observed_issues.append("pollinator_decline")
 
-        if any(k in text_lower for k in ["biodiversity is declining", "biodiversity loss", "declining biodiversity", "biodiversity is getting worse", "species disappearing", "biodiversity declining"]):
+        if any(k in text_lower for k in ["biodiversity is declining", "biodiversity loss", "declining biodiversity", "biodiversity is getting worse", "species disappearing", "biodiversity declining", "biodiversity dropped", "biodiversity has dropped"]):
             profile.biodiversity.species_richness = EnvironmentalMetric[str](
                 value="declining",
                 status=ValueStatus.PROVIDED
             )
             profile.biodiversity.observed_issues.append("biodiversity_decline")
 
+        # Invasive species and native vegetation suppression detection
+        if any(k in text_lower for k in ["invasive", "weed species", "choking native", "invasive species", "alien plant", "choking"]):
+            if "invasive_species_dominance" not in profile.biodiversity.observed_issues:
+                profile.biodiversity.observed_issues.append("invasive_species_dominance")
+            if any(k in text_lower for k in ["choking", "suppress", "lost", "kill", "displace", "outcompet"]):
+                if "native_vegetation_suppression" not in profile.biodiversity.observed_issues:
+                    profile.biodiversity.observed_issues.append("native_vegetation_suppression")
+            if not profile.biodiversity.species_richness.is_known:
+                profile.biodiversity.species_richness = EnvironmentalMetric[str](
+                    value="declining",
+                    status=ValueStatus.PROVIDED
+                )
+
+        # Riverbank slope instability / root cohesion loss
+        if any(k in text_lower for k in ["slope instability", "bank instability", "riverbank slope", "bank erosion", "poor root cohesion", "bank failure", "slope failure"]):
+            if "bank_instability" not in profile.biodiversity.observed_issues:
+                profile.biodiversity.observed_issues.append("bank_instability")
+            if "poor root cohesion" in text_lower or "root cohesion" in text_lower:
+                if "poor_root_cohesion" not in profile.biodiversity.observed_issues:
+                    profile.biodiversity.observed_issues.append("poor_root_cohesion")
+
+        # Soil biological activity (earthworms, microbes, mycorrhizae) detection
+        _soil_biology_keywords = [
+            "earthworm", "earth worm", "worm population", "worms have vanished",
+            "worms disappeared", "no worms", "loss of worms", "worm decline",
+            "soil fauna", "soil macrofauna", "macrofauna", "soil invertebrate",
+            "soil organism", "belowground fauna", "annelid",
+            "microbial", "microbe", "microbiome", "mycorrhiz", "microbial biomass",
+            "soil biology", "biological activity",
+        ]
+        _soil_biology_negative_keywords = [
+            "vanish", "disappear", "decline", "lost", "absent", "gone",
+            "collapse", "drop", "reduced", "low", "scarce", "no ",
+            "deplet", "depletion",
+        ]
+        if any(k in text_lower for k in _soil_biology_keywords):
+            # Only mark as degraded if a loss/absence/depletion signal is also present
+            if any(k in text_lower for k in _soil_biology_negative_keywords):
+                profile.biodiversity.soil_biological_activity = EnvironmentalMetric[str](
+                    value="low",
+                    status=ValueStatus.PROVIDED,
+                    raw_input="soil fauna/microbial depletion detected"
+                )
+                if "soil_biological_depletion" not in profile.biodiversity.observed_issues:
+                    profile.biodiversity.observed_issues.append("soil_biological_depletion")
+            else:
+                if "soil_biology_noted" not in profile.biodiversity.observed_issues:
+                    profile.biodiversity.observed_issues.append("soil_biology_noted")
+
         # -----------------------------
         # 8. Human Impact (Pollution & Deforestation)
         # -----------------------------
-        if any(k in text_lower for k in ["pesticide", "chemical", "fertilizer", "herbicide", "runoff", "pollution"]):
+        # Nitrate / agricultural nutrient runoff detection
+        if any(k in text_lower for k in ["nitrate", "nitrogen runoff", "phosphate", "nutrient runoff", "nitrate runoff", "45 mg/l", "mg/l nitrate"]):
             profile.human_impact.pollution_level = EnvironmentalMetric[str](
-                value="high" if "heavy" in text_lower or "intensive" in text_lower else "moderate",
+                value="high" if any(k in text_lower for k in ["45 mg", "high nitrate", "heavy nitrate", "severe nitrate"]) else "moderate",
                 status=ValueStatus.PROVIDED
             )
-            if "pesticide" in text_lower:
+            if "nitrate_runoff" not in profile.human_impact.pollution_types:
+                profile.human_impact.pollution_types.append("nitrate_runoff")
+            if "excess_nutrients" not in profile.human_impact.pollution_types:
+                profile.human_impact.pollution_types.append("excess_nutrients")
+            if "nitrate_pollution" not in profile.biodiversity.observed_issues:
+                profile.biodiversity.observed_issues.append("nitrate_pollution")
+
+        # Agrochemical keywords — glyphosate/herbicides always set high pollution
+        _high_pollution_keywords = [
+            "glyphosate", "roundup", "atrazine", "2,4-d", "paraquat",
+            "chlorpyrifos", "neonicotinoid", "imidacloprid", "fungicide",
+            "insecticide", "agrochemical", "agrichemical",
+            "heavy pesticide", "intensive pesticide", "frequent pesticide",
+            "heavy chemical", "intensive chemical", "frequent chemical application",
+            "heavy herbicide", "frequent herbicide",
+        ]
+        _moderate_pollution_keywords = [
+            "pesticide", "herbicide", "chemical pollution", "pesticide runoff",
+            "chemical runoff", "toxic runoff", "fertilizer pollution", "severe chemical",
+            "spraying chemicals", "synthetic pesticide", "toxic spray",
+        ]
+
+        if any(k in text_lower for k in _high_pollution_keywords):
+            profile.human_impact.pollution_level = EnvironmentalMetric[str](
+                value="high",
+                status=ValueStatus.PROVIDED
+            )
+            # Detect specific types
+            if any(k in text_lower for k in ["glyphosate", "roundup", "herbicide", "2,4-d", "atrazine", "paraquat"]):
+                if "herbicides" not in profile.human_impact.pollution_types:
+                    profile.human_impact.pollution_types.append("herbicides")
+            if any(k in text_lower for k in ["insecticide", "neonicotinoid", "imidacloprid", "chlorpyrifos"]):
+                if "insecticides" not in profile.human_impact.pollution_types:
+                    profile.human_impact.pollution_types.append("insecticides")
+            if any(k in text_lower for k in ["fungicide"]):
+                if "fungicides" not in profile.human_impact.pollution_types:
+                    profile.human_impact.pollution_types.append("fungicides")
+            if "glyphosate" in text_lower or "roundup" in text_lower:
+                if "glyphosate" not in profile.human_impact.pollution_types:
+                    profile.human_impact.pollution_types.append("glyphosate")
+
+        elif any(k in text_lower for k in _moderate_pollution_keywords):
+            if not profile.human_impact.pollution_level.is_known:
+                profile.human_impact.pollution_level = EnvironmentalMetric[str](
+                    value="high" if ("heavy" in text_lower or "intensive" in text_lower or "frequent" in text_lower) else "moderate",
+                    status=ValueStatus.PROVIDED
+                )
+            if "pesticide" in text_lower and "pesticides" not in profile.human_impact.pollution_types:
                 profile.human_impact.pollution_types.append("pesticides")
-            if "fertilizer" in text_lower:
+            if "fertilizer" in text_lower and "synthetic_fertilizer" not in profile.human_impact.pollution_types:
                 profile.human_impact.pollution_types.append("synthetic_fertilizer")
 
         if any(k in text_lower for k in ["deforest", "cleared trees", "logging", "cleared forest"]):
@@ -342,6 +451,8 @@ Rules:
             temperature=0.0,
             messages=[{"role": "user", "content": prompt}]
         )
+        if not response.content or not hasattr(response.content[0], "text") or not response.content[0].text:
+            raise RuntimeError(f"Anthropic returned empty content (stop_reason={response.stop_reason!r}). Falling back to rule-based extraction.")
         content = response.content[0].text.strip()
         if content.startswith("```json"):
             content = content[7:]

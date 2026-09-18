@@ -68,7 +68,7 @@ class RelationshipGraph:
         self._edge_evaluators[edge_id] = evaluator
 
     def _build_graph(self):
-        """Initializes the 12 explicit causal ecological edges."""
+        """Initializes the 15 explicit causal ecological edges."""
 
         # -------------------------------------------------------------
         # 1. Low SOC -> Reduced Infiltration
@@ -263,7 +263,7 @@ class RelationshipGraph:
             edge_id="edge_rainfall_to_hydrological_constraint",
             source_node="climate.rainfall_mm_year",
             target_node="climate.hydrological_constraint",
-            condition_description="Rainfall < 400mm/yr or semi-arid/arid biome",
+            condition_description="Rainfall <400mm/yr or semi-arid/arid biome",
             effect_direction=EffectDirection.INCREASES,
             mechanism="Chronic atmospheric and precipitation deficits limit natural biomass regeneration and increase susceptibility to secondary land degradation.",
             strength=EdgeStrength.ESTABLISHED,
@@ -271,6 +271,112 @@ class RelationshipGraph:
                 (p.climate.rainfall_mm_year.is_known and p.climate.rainfall_mm_year.value is not None and p.climate.rainfall_mm_year.value < 400.0) or
                 (p.climate.rainfall_pattern.is_known and "low" in str(p.climate.rainfall_pattern.value).lower()) or
                 (p.location.biome in ["semi_arid", "arid"])
+            )
+        )
+
+        # -------------------------------------------------------------
+        # 13. Acidic Soil pH -> Soil Biological Activity Loss (Earthworms)
+        # -------------------------------------------------------------
+        self._add_edge(
+            edge_id="edge_acidic_ph_to_soil_biology",
+            source_node="soil.ph",
+            target_node="biodiversity.soil_biological_activity",
+            condition_description="Soil pH < 6.0 (acidic)",
+            effect_direction=EffectDirection.DECREASES,
+            mechanism="Acidic soils below pH 6.0 suppress earthworm neuromuscular function, reduce calcium availability essential for clitellum reproduction, and inhibit bacterial nitrification, causing soil macrofauna population collapse.",
+            strength=EdgeStrength.ESTABLISHED,
+            evaluator=lambda p, active: (
+                p.soil.ph.is_known and
+                p.soil.ph.value is not None and
+                p.soil.ph.value < 6.0
+            )
+        )
+
+        # -------------------------------------------------------------
+        # 14. Low Soil Biological Activity -> Microbial Diversity Collapse
+        # -------------------------------------------------------------
+        self._add_edge(
+            edge_id="edge_soil_biology_to_microbial_diversity",
+            source_node="biodiversity.soil_biological_activity",
+            target_node="biodiversity.soil_microbial_diversity",
+            condition_description="Soil biological activity observed as low or earthworm loss detected",
+            effect_direction=EffectDirection.DECREASES,
+            mechanism="Earthworm bioturbation and cast deposition are primary drivers of bacterial and fungal community stratification; their absence collapses microbial community diversity, reduces nutrient cycling rates, and impairs aggregate stability.",
+            strength=EdgeStrength.ESTABLISHED,
+            evaluator=lambda p, active: (
+                "biodiversity.soil_biological_activity" in active or
+                (p.biodiversity.soil_biological_activity.is_known and
+                 str(p.biodiversity.soil_biological_activity.value).lower() in ["low", "absent", "depleted"]) or
+                "earthworm_loss" in p.biodiversity.observed_issues
+            )
+        )
+
+        # -------------------------------------------------------------
+        # 15. Non-Target Ecotoxicity -> Soil Biological Activity Loss
+        # -------------------------------------------------------------
+        self._add_edge(
+            edge_id="edge_toxicity_to_soil_biology",
+            source_node="biodiversity.non_target_toxicity",
+            target_node="biodiversity.soil_biological_activity",
+            condition_description="Non-target ecotoxicity active (herbicides, pesticides including glyphosate)",
+            effect_direction=EffectDirection.DECREASES,
+            mechanism="Glyphosate and broad-spectrum agrochemical residues suppress earthworm reproduction at documented EC50 thresholds, reduce soil microbial biomass carbon by 40-60%, and drive soil macrofauna community collapse through disruption of the shikimate metabolic pathway in gut microbiota.",
+            strength=EdgeStrength.ESTABLISHED,
+            evaluator=lambda p, active: "biodiversity.non_target_toxicity" in active
+        )
+
+        # -------------------------------------------------------------
+        # 16. Nitrate Runoff -> Riparian Eutrophication & Aquatic Integrity Decline
+        # -------------------------------------------------------------
+        self._add_edge(
+            edge_id="edge_nitrate_to_riparian_eutrophication",
+            source_node="human_impact.pollution_level",
+            target_node="biodiversity.aquatic_and_riparian_integrity",
+            condition_description="Nitrate runoff >10 mg/L or agricultural nutrient pollution active",
+            effect_direction=EffectDirection.DECREASES,
+            mechanism="Agricultural nitrate leachate and nutrient-laden surface runoff overwhelm the assimilative buffer capacity, driving eutrophication, nocturnal hypoxia, and loss of sensitive native aquatic and riparian macroinvertebrate taxa.",
+            strength=EdgeStrength.ESTABLISHED,
+            evaluator=lambda p, active: (
+                any(t in p.human_impact.pollution_types for t in ["nitrate_runoff", "excess_nutrients", "nitrate"]) or
+                "nitrate_pollution" in p.biodiversity.observed_issues or
+                (p.human_impact.pollution_level.is_known and p.human_impact.pollution_level.value in ["high", "severe"])
+            )
+        )
+
+        # -------------------------------------------------------------
+        # 17. Invasive Weed Dominance -> Native Riparian Species (Willow) Suppression
+        # -------------------------------------------------------------
+        self._add_edge(
+            edge_id="edge_invasive_weeds_to_species_richness",
+            source_node="biodiversity.invasive_species_dominance",
+            target_node="biodiversity.species_richness",
+            condition_description="Invasive weed dominance or native vegetation choking observed",
+            effect_direction=EffectDirection.DECREASES,
+            mechanism="Dense mono-specific stands of invasive weeds outcompete indigenous woody riparian pioneers (e.g., native Salix willow guilds) for solar radiation, moisture, and root-zone establishment space, suppressing native regeneration and collapsing structural habitat diversity.",
+            strength=EdgeStrength.ESTABLISHED,
+            evaluator=lambda p, active: (
+                "invasive_species_dominance" in p.biodiversity.observed_issues or
+                "native_vegetation_suppression" in p.biodiversity.observed_issues or
+                (p.biodiversity.species_richness.is_known and p.biodiversity.species_richness.value == "declining")
+            )
+        )
+
+        # -------------------------------------------------------------
+        # 18. Riverbank Slope Instability -> Soil Erosion & Riparian Habitat Loss
+        # -------------------------------------------------------------
+        self._add_edge(
+            edge_id="edge_bank_instability_to_erosion",
+            source_node="land.riverbank_slope_instability",
+            target_node="land.riverbank_erosion",
+            condition_description="Riverbank slope instability or poor root cohesion observed",
+            effect_direction=EffectDirection.INCREASES,
+            mechanism="Loss of deep, fibrous woody root architecture along riverbank slopes reduces soil shear resistance, leaving unanchored alluvial sediment highly susceptible to gravitational mass failure, bank slumping, and acute fluvial scouring during high-flow events.",
+            strength=EdgeStrength.ESTABLISHED,
+            evaluator=lambda p, active: (
+                "bank_instability" in p.biodiversity.observed_issues or
+                "slope_instability" in p.biodiversity.observed_issues or
+                "poor_root_cohesion" in p.biodiversity.observed_issues or
+                (p.land.land_cover.is_known and "riparian" in str(p.land.land_cover.value).lower())
             )
         )
 
@@ -300,9 +406,9 @@ class RelationshipGraph:
 
         return active_edges
 
-    def find_stress_pathways(self, profile: EnvironmentalProfile, min_length: int = 2) -> List[StressPathway]:
+    def find_stress_pathways(self, profile: EnvironmentalProfile, min_length: int = 1) -> List[StressPathway]:
         """
-        Traverses the graph to extract multi-edge causal chains (length >= min_length).
+        Traverses the graph to extract causal chains (length >= min_length).
         Returns structured StressPathway objects describing the end-to-end stress mechanics.
         """
         active_edges = self.evaluate_active_edges(profile)

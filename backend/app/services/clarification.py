@@ -58,7 +58,7 @@ class ClarificationEngine:
         Returns:
             - needs_clarification: bool
             - missing_items: List[MissingInfoItem] (capped at 2-3 items)
-            - clarification_prompt: Optional formatted markdown text
+            - clarification_prompt: Optional formatted plain-text
         """
         missing_items: List[MissingInfoItem] = []
 
@@ -110,17 +110,17 @@ class ClarificationEngine:
         # Cap follow-up questions at top 2 or 3 to avoid overwhelming the user
         prioritized_items = sorted(missing_items, key=lambda x: x.priority)[:3]
 
-        # Generate conversational clarification prompt
+        # Generate clean conversational clarification prompt without raw markdown asterisks
         prompt_lines = [
             "I can help analyze your ecosystem and diagnose the drivers of biodiversity decline.",
             "To generate scientifically grounded recommendations tailored to your land, could you clarify:",
             ""
         ]
         for i, item in enumerate(prioritized_items, 1):
-            prompt_lines.append(f"{i}. **{item.category.title()}**: {item.question}")
+            prompt_lines.append(f"{i}. {item.category.title()}: {item.question}")
 
         prompt_lines.append("")
-        prompt_lines.append("*Note: If you don't have exact numbers, qualitative descriptions (e.g., 'dry sandy soil', 'very little rain') work as well.*")
+        prompt_lines.append("Note: If you do not have exact numbers, qualitative descriptions (e.g., 'dry sandy soil', 'very little rain') work as well.")
 
         clarification_prompt = "\n".join(prompt_lines)
         return True, prioritized_items, clarification_prompt

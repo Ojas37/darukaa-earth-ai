@@ -536,6 +536,11 @@ class RecommendationGenerator:
                 temperature=0.15,
                 messages=[{"role": "user", "content": prompt}],
             )
+            if not response.content or not hasattr(response.content[0], "text") or not response.content[0].text:
+                raise RuntimeError(
+                    f"Anthropic returned empty content (stop_reason={response.stop_reason!r}). "
+                    "The model may be overloaded — retrying..."
+                )
             return response.content[0].text.strip()
 
         elif self._provider == "groq":
