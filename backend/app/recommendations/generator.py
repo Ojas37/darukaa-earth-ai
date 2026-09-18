@@ -17,10 +17,11 @@ Design rules enforced here:
     evidence quality (similarity scores), and whether any counterpoints were
     retrieved for the pathway.
   • LLM provider: Anthropic Claude (if ANTHROPIC_API_KEY set) or Groq
-    (if GROQ_API_KEY set, uses llama-3.3-70b-versatile). Anthropic takes
+    (if GROQ_API_KEY set, uses openai/gpt-oss-120b). Anthropic takes
     precedence if both are present.
 """
 
+import os
 import json
 import logging
 from typing import Optional
@@ -487,10 +488,17 @@ class RecommendationGenerator:
     ):
         self._provider: Optional[str] = None
         self.client = None
+        self._anthropic_api_key = anthropic_api_key
+        self._groq_api_key = groq_api_key
+        self._init_client()
 
-        # Anthropic takes precedence
-        ant_key = anthropic_api_key or settings.anthropic_api_key
-        groq_key = groq_api_key or getattr(settings, "groq_api_key", "")
+    def _init_client(self):
+        """Initializes or refreshes LLM client if not already active."""
+        if self.client is not None:
+            return
+
+        ant_key = self._anthropic_api_key or getattr(settings, "anthropic_api_key", "") or os.getenv("ANTHROPIC_API_KEY", "")
+        groq_key = self._groq_api_key or getattr(settings, "groq_api_key", "") or os.getenv("GROQ_API_KEY", "")
 
         if ant_key:
             try:
@@ -506,7 +514,7 @@ class RecommendationGenerator:
                 from groq import Groq
                 self.client = Groq(api_key=groq_key)
                 self._provider = "groq"
-                logger.info("RecommendationGenerator using Groq (llama-3.3-70b-versatile).")
+                logger.info(f"RecommendationGenerator using Groq ({GROQ_MODEL}).")
             except ImportError:
                 logger.warning("groq package not installed. Run: pip install groq")
             except Exception as e:
@@ -519,6 +527,7 @@ class RecommendationGenerator:
 
     def _call_llm(self, prompt: str) -> str:
         """Provider-agnostic single-turn LLM call. Returns raw text response."""
+        self._init_client()
         if self._provider == "anthropic":
             import anthropic
             response = self.client.messages.create(
@@ -551,6 +560,7 @@ class RecommendationGenerator:
         Generates one Recommendation per distinct pathway.
         Returns a deduplicated list of validated Recommendation objects.
         """
+        self._init_client()
         if self.client is None:
             logger.warning("No LLM client — skipping recommendation generation.")
             return []
@@ -670,8 +680,6 @@ class RecommendationGenerator:
                 f"unsupported={validation_result.unsupported_numbers}"
             )
             rewritten_text = validation_result.rewritten_claim or rec_text
-            # Attempt to split rewritten back into recommendation / why_it_works
-            # (best-effort split at sentence boundary)
             sentences = [s.strip() for s in rewritten_text.split(".") if s.strip()]
             mid = max(1, len(sentences) // 2)
             data["recommendation"] = ". ".join(sentences[:mid]) + "."
@@ -706,10 +714,9 @@ class RecommendationGenerator:
         # 7. Build affected_metrics — merge LLM output with pathway nodes as ground truth
         llm_metrics = data.get("affected_metrics", [])
         pathway_nodes = pathway.nodes
-        # Ensure at least the pathway's first and last nodes are present
         combined_metrics = list(dict.fromkeys(
             llm_metrics + [pathway_nodes[0], pathway_nodes[-1]]
-        ))[:6]  # cap at 6 for clarity
+        ))[:6]
 
         # 8. Constraint notes
         constraint_note = data.get("constraint_notes") or None
