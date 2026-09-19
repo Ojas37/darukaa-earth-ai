@@ -12,6 +12,12 @@
 
 ---
 
+
+
+https://github.com/user-attachments/assets/b5edd8ee-185c-4503-9fed-f1f4cb595a22
+
+
+
 ## 🏛️ 1. Architecture Overview
 
 Darukaa employs an **evidence-locked, causal-reasoning architecture** that decouples biological deduction from LLM text generation to prevent hallucinations.
